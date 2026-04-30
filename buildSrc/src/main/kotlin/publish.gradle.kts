@@ -5,6 +5,7 @@ import java.net.URLEncoder
 var libProjects = mutableSetOf(
     project(":backends:backend-shared"),
     project(":backends:backend-web"),
+    project(":backends:backend-minigame"),
     project(":extensions:gdx-controllers-teavm"),
     project(":extensions:gdx-freetype-teavm"),
     project(":extensions:asset-loader")
@@ -44,17 +45,17 @@ configure(libProjects) {
                 pom {
                     name.set(LibExt.libName)
                     description.set("Tool to generate libgdx to javascript using teaVM")
-                    url.set("https://github.com/xpenatan/gdx-teavm")
+                    url.set("https://github.com/zourgames/gdx-minigame")
                     developers {
                         developer {
-                            id.set("Xpe")
-                            name.set("Natan")
+                            id.set("zour")
+                            name.set("Daniel")
                         }
                     }
                     scm {
-                        connection.set("scm:git@github.com:xpenatan/gdx-teavm.git")
-                        developerConnection.set("scm:git@github.com:xpenatan/gdx-teavm.git")
-                        url.set("https://github.com/xpenatan/gdx-teavm")
+                        connection.set("scm:git@github.com:zourgames/gdx-minigame.git")
+                        developerConnection.set("scm:git@github.com:zourgames/gdx-minigame.git")
+                        url.set("https://github.com/zourgames/gdx-minigame")
                     }
                     licenses {
                         license {
