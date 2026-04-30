@@ -2,7 +2,7 @@ import java.io.File
 import java.util.*
 
 object LibExt {
-    const val groupId = "com.github.xpenatan.gdx-teavm"
+    const val groupId = "com.zourgames.gdx"
     const val libName = "gdx-teavm"
     var isRelease = false
     var libVersion: String = ""
@@ -66,14 +66,15 @@ object LibExt {
     }
 
     private fun getVersion(): String {
-        var libVersion = "-SNAPSHOT"
         val file = File("gradle.properties")
         if(file.exists()) {
             val properties = Properties()
             properties.load(file.inputStream())
             val version = properties.getProperty("version")
             if(LibExt.isRelease) {
-                libVersion = version
+                return version
+            } else {
+                return "${version}-SNAPSHOT"
             }
         }
         else {
@@ -81,6 +82,6 @@ object LibExt {
                 throw RuntimeException("properties should exist")
             }
         }
-        return libVersion
+        return "-SNAPSHOT"
     }
 }
