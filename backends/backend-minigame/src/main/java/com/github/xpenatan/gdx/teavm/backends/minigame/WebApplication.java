@@ -1,11 +1,11 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame;
 
-import java.util.ArrayList;
 import org.teavm.jso.JSObject;
+import java.util.ArrayList;
 
 /**
- * Stub for compilation - will be replaced by MiniGameApplication in Phase 3.
- * Referenced by emu files.
+ * Compatibility stub for emu files that reference WebApplication.
+ * Delegates to MiniGameApplication at runtime.
  */
 public class WebApplication {
 
