@@ -74,6 +74,9 @@ public final class WX {
     @JSBody(params = "key", script = "wx.removeStorageSync(key);")
     public static native void removeStorageSync(String key);
 
+    @JSBody(script = "return wx.getStorageInfoSync().keys;")
+    public static native String[] getStorageInfoKeys();
+
     // === File System ===
 
     @JSBody(script = "return wx.getFileSystemManager();")

@@ -12,8 +12,6 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetLoaderListener;
-import com.github.xpenatan.gdx.teavm.backends.minigame.WebApplication;
-import com.github.xpenatan.gdx.teavm.backends.minigame.WebApplicationConfiguration;
 import com.github.xpenatan.gdx.teavm.backends.minigame.dom.typedarray.TypedArrays;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetType;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.WebBlob;
@@ -92,7 +90,6 @@ public class Pixmap implements Disposable, PixmapNativeInterface {
 
     public Pixmap(FileHandle file) {
         String path = file.path();
-        WebApplicationConfiguration config = ((WebApplication)Gdx.app).getConfig();
         if(!file.exists()) {
             // Add a way to debug when assets was not loaded in preloader.
             throw new GdxRuntimeException("File is null, it does not exist: " + path);

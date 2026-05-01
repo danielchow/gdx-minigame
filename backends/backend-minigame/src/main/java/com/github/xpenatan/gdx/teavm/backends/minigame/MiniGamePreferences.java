@@ -23,9 +23,43 @@ public class MiniGamePreferences implements Preferences {
     public MiniGamePreferences(String prefix, boolean shouldEncode) {
         this.prefix = ID_FOR_PREF + prefix + ":";
         this.shouldEncode = shouldEncode;
-        // WeChat storage is synchronous — just load all keys at construction time
-        // For simplicity, we don't enumerate keys here (WX storage doesn't have key() enumeration)
-        // Values will be loaded lazily on get*() calls
+        int prefixLength = this.prefix.length();
+        try {
+            String[] allKeys = WX.getStorageInfoKeys();
+            if(allKeys != null) {
+                for(String keyEncoded : allKeys) {
+                    String key = keyEncoded;
+                    if(shouldEncode) {
+                        key = new String(HEXCoder.decode(keyEncoded));
+                    }
+                    boolean flag = key.startsWith(this.prefix);
+                    if(flag) {
+                        String value = WX.getStorageSync(keyEncoded);
+                        String keyStr = key.substring(prefixLength, key.length() - 1);
+                        Object object;
+                        if(shouldEncode) {
+                            object = toObject(key, new String(HEXCoder.decode(value)));
+                        }
+                        else {
+                            object = toObject(key, value);
+                        }
+                        values.put(keyStr, object);
+                    }
+                }
+            }
+        }
+        catch(Exception e) {
+            e.printStackTrace();
+            values.clear();
+        }
+    }
+
+    private Object toObject(String key, String value) {
+        if(key.endsWith("b")) return Boolean.valueOf(value);
+        if(key.endsWith("i")) return Integer.valueOf(value);
+        if(key.endsWith("l")) return Long.valueOf(value);
+        if(key.endsWith("f")) return Float.valueOf(value);
+        return value;
     }
 
     private String toStorageKey(String key, Object value) {

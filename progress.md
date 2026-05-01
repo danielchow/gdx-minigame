@@ -134,3 +134,256 @@ The polling pattern `while (typeof window.Gdx === 'undefined') { await new Promi
 3. Polling ensures Gdx is available before game code loads ✅
 4. Sequential subpackage loading (engine → game) prevents race conditions ✅
 
+
+---
+
+## Review — 2026-05-01 (Infinite Recursion Fix in MiniGameGraphics.java)
+
+### What's correct
+
+1. **Fix is surgical and correct.** Exactly 2 lines changed in `MiniGameGraphics.java`: `getDensity()` → `getNativeScreenDensity()` in both `getPpiX()` and `getPpiY()`. No other modifications to this file.
+
+2. **Call chain is now cycle-free:**
+   - `getPpiX()` → `getNativeScreenDensity()` → `WX.getPixelRatio()` → `@JSBody(script = "return wx.getSystemInfoSync().pixelRatio;")` — **terminal leaf**, no further Java calls
+   - `getPpiY()` → same path, no cycle
+   - `getDensity()` → `getPpiX()` → `getNativeScreenDensity()` → `WX.getPixelRatio()` — no loop because `getPpiX()` no longer calls `getDensity()`
+
+3. **Pattern matches WebGraphics.java exactly.** Both implementations share identical structure:
+   - `getPpiX()` / `getPpiY()`: `96f * getNativeScreenDensity()`
+   - `getDensity()`: `ppiX / 160f` with overflow guard
+   - `getPpcX()` / `getPpcY()`: `ppiX / 2.54f`
+
+4. **Build verification passes:**
+   - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+   - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+5. **Terminal call confirmed.** `WX.getPixelRatio()` is a `@JSBody` native method — it executes JavaScript directly and cannot recurse back into Java code.
+
+### Note: Observations
+
+- **Additional files in commit:** The same commit also adds two new files (`MiniGameBuildConfiguration.java` and `MiniGameBackend.java` — 281 lines total). These are Phase 4+5 build infrastructure additions, unrelated to the recursion fix. They were reviewed separately as part of the build backend phase.
+
+- **Original bug confirmed:** Before the fix, `getPpiX()` called `getDensity()`, which called `getPpiX()` — an immediate infinite recursion with no base case. The fix correctly breaks this by having PPI methods call the terminal `getNativeScreenDensity()` directly, matching the established WebGraphics pattern.
+
+- **No issues found.** The fix is minimal, correct, and consistent with the reference implementation.
+
+---
+
+## Review — 2026-05-01 (GWT-Style Native Method Fix in MiniGameInput.java)
+
+### What's correct
+
+1. **`@JSBody` correctly replaces GWT `/*-{ }-*/` syntax.** TeaVM does not support GWT's `native ... /*-{ }-*/` syntax. The fix uses `@JSBody(params = "event", script = "return event.changedTouches;")` which is the idiomatic TeaVM way to write native JavaScript bridges. The parameter name `event` in `params` matches the method signature parameter, and the script is correct JS.
+
+2. **Method is `static` as required by `@JSBody`.** TeaVM's `@JSBody` requires annotated methods to be `static` (they cannot reference `this`). The native method has no dependency on instance state — it only extracts a property from a JS object — so making it static is both correct and semantically appropriate.
+
+3. **Built-in `org.teavm.jso.dom.events.Touch` correctly replaces custom `TouchJS`.** Verified the TeaVM API via `javap` on `teavm-jso-apis-0.13.0.jar`:
+   - `int getIdentifier()` — matches usage `touch.getIdentifier()` → `int id` ✅
+   - `double getClientX()` — matches usage `(int) touch.getClientX()` ✅
+   - `double getClientY()` — matches usage `(int) touch.getClientY()` ✅
+   - Extends `JSObject` — compatible with `JSArrayReader<Touch>` ✅
+
+4. **`(int)` casts are correct and necessary.** The old `TouchJS` declared `getClientX()`/`getClientY()` returning `int` via `@JSProperty`. TeaVM's `Touch` returns `double` (matching the W3C Touch spec). The explicit `(int)` casts handle the narrowing conversion correctly. No data loss concern since touch coordinates are pixel values that fit in `int`.
+
+5. **No remaining `TouchJS` references.** `grep` across the entire `backends/` directory returns zero matches. The custom interface was completely removed.
+
+6. **Touch handling logic intact.** The three event types (touchstart=0, touchmove=1, touchend/cancel=2) and their callbacks are unchanged:
+   - `TOUCH_DOWN`: records touch, sets `justTouched`, fires `processor.touchDown()` ✅
+   - `TOUCH_MOVE`: computes delta, updates position, fires `processor.touchDragged()` ✅
+   - `TOUCH_UP`: clears touch, computes final delta, fires `processor.touchUp()` ✅
+   - All paths update `mouseLastX`/`mouseLastY` ✅
+   - Bounds check `id >= 0 && id < MAX_TOUCHES` preserved ✅
+
+7. **Build verification passes:**
+   - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+   - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+8. **Other files in same commit are unrelated.** `MiniGameGraphics.java` had a separate infinite recursion fix (already reviewed). `MiniGameBuildConfiguration.java` and `MiniGameBackend.java` are new build infrastructure files for Phase 4+5. Neither touches input logic.
+
+### Note: Observations
+
+- **Return type is `JSArrayReader<Touch>` not `JSArray<Touch>`.** This is fine — `JSArrayReader` is the read-only supertype and provides `getLength()` and `get(i)`, which is all that's needed here. No mutation of the array is required.
+
+- **Null guard `if (changedTouches == null) return;` is sensible.** Defensive check against malformed touch events from the WeChat runtime.
+
+- **No issues found.** The fix is correct, complete, and follows TeaVM conventions properly.
+
+---
+
+## Review — 2026-05-01 (ClassCastException Fix in Pixmap emu)
+
+### What's correct
+
+1. **Dead code removed cleanly.** The line `WebApplicationConfiguration config = ((WebApplication)Gdx.app).getConfig();` in the `Pixmap(FileHandle)` constructor was the only usage of both `WebApplication` and `WebApplicationConfiguration` in the file. Removing it eliminates the `ClassCastException` that would occur when `Gdx.app` is a `MiniGameApplication` (not a `WebApplication`).
+
+2. **Unused imports correctly removed.** Both `import com.github.xpenatan.gdx.teavm.backends.minigame.WebApplication` and `import com.github.xpenatan.gdx.teavm.backends.minigame.WebApplicationConfiguration` were removed — `grep` confirms zero remaining references to either class.
+
+3. **Pixmap(FileHandle) constructor logic fully preserved.** After the removal, the constructor still:
+   - Gets `file.path()` ✅
+   - Checks `file.exists()` with descriptive error message ✅
+   - Calls `file.readBytes()` to load data ✅
+   - Creates `new Gdx2DPixmap(bytes, 0, bytes.length, 0)` ✅
+
+4. **ThrowableEmu.java correctly left unchanged.** Its `WebApplication` usage is legitimate — it calls `WebApplication.printErrorStack(this)` as a static utility for stack trace printing. This is not a cast and does not cause `ClassCastException`.
+
+5. **Build verification passes:**
+   - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+   - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+6. **No similar casts found elsewhere.** Searched the entire `backends/backend-minigame/emu/` tree for `((WebApplication)Gdx.app)` and `WebApplicationConfiguration` — zero matches. This was the only occurrence.
+
+### Note: Observations
+
+- **The `config` variable was never used.** Even before this fix, the `config` line was dead code — `config` was declared but never referenced. The removal is purely additive (removes a runtime crash) with no behavioral change.
+
+---
+
+## Review — 2026-05-01 (Multi-Touch touchMap Fix in MiniGameInput.java)
+
+### What's correct
+
+1. **touchMap correctly maps raw JS touch identifiers to sequential pointer indices.** The WeChat/JS touch API assigns arbitrary identifiers (e.g., 0, 3, 7) that may exceed `MAX_TOUCHES=20` and aren't sequential. The `IntMap<Integer> touchMap` properly decouples these from the libGDX pointer index space (0–19).
+
+2. **All three event types use touchMap correctly:**
+   - **TOUCH_DOWN (type==0):** `touchMap.put(real, touchId = getAvailablePointer())` — allocates a fresh sequential index, stores the mapping, then uses `touchId` for all array indexing and the `InputProcessor.touchDown()` callback. ✅
+   - **TOUCH_MOVE (type==1):** `int touchId = touchMap.get(real, -1)` — looks up the stored mapping with -1 as default. The `if (touchId >= 0)` guard skips orphaned move events gracefully. Uses `touchId` for all array indexing and `touchDragged()` callback. ✅
+   - **TOUCH_UP/CANCEL (type==2):** `Integer touchIdObj = touchMap.get(real)` with `null` check — safely handles stale/unknown identifiers. Then `touchMap.remove(real)` cleans up the mapping. Uses `touchId` for all array indexing and `touchUp()` callback. ✅
+
+3. **Sequential touchId is used consistently for ALL array indexing:** `touched[touchId]`, `touchX[touchId]`, `touchY[touchId]`, `deltaX[touchId]`, `deltaY[touchId]` — no raw `real` identifier ever touches these arrays. ✅
+
+4. **Sequential touchId is passed to ALL InputProcessor callbacks:** `touchDown(x, y, touchId, ...)`, `touchDragged(x, y, touchId)`, `touchUp(x, y, touchId, ...)` — no hardcoded `0` as in the old code. ✅
+
+5. **pressedButtons is correctly scoped to pointer 0:**
+   - TOUCH_DOWN: `if (touchId == 0) pressedButtons.put(Input.Buttons.LEFT, true)` — only the primary pointer triggers a mouse button press. ✅
+   - TOUCH_UP: `if (touchId == 0)` checks if any other touches remain (`for j in 0..MAX_TOUCHES`), and only removes the button press when all touches are released. ✅
+   - This matches libGDX scene2d expectations where `isButtonPressed(LEFT)` reflects primary touch state.
+
+6. **justTouched moved outside the per-touch loop.** `if (type == 0) justTouched = true;` is now before the `for` loop, so it's set once per touchstart event rather than once per finger. This matches the libGDX contract (justTouched is true if *any* touch started this frame). ✅
+
+7. **getAvailablePointer() implementation is correct.** Iterates 0..MAX_TOUCHES, returns the first index not present in `touchMap.values()`. Uses `containsValue(i, false)` — the `false` parameter means `.equals()` comparison (not reference identity), which is correct for autoboxed `Integer` values. ✅
+
+8. **Graceful handling of edge cases:**
+   - Move for unknown identifier: `touchMap.get(real, -1)` returns -1, `if (touchId >= 0)` skips it — no crash, no corruption. ✅
+   - Up/Cancel for unknown identifier: `touchMap.get(real)` returns null, `if (touchIdObj != null)` skips it. ✅
+   - All 20 pointers exhausted: `getAvailablePointer()` returns 0 (overwrites pointer 0). Acceptable — 20 simultaneous touches is effectively impossible on mobile. ✅
+
+9. **Old bugs fixed by this change:**
+   - Before: all touchDown/touchDragged/touchUp callbacks used hardcoded pointer `0`, breaking multi-touch (second finger overwrites first finger's state). ✅ Fixed
+   - Before: `pressedButtons.remove(LEFT)` ran on every touchUp, even if other fingers were still down. ✅ Fixed (now checks `anyTouched`)
+   - Before: raw JS identifiers used directly as array indices — potential `ArrayIndexOutOfBoundsException` if identifier ≥ 20. ✅ Fixed
+
+10. **Build verification passes:**
+    - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+    - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+11. **Other files in same commit are unrelated to this fix.** `MiniGameGraphics.java` (recursion fix), `MiniGameBuildConfiguration.java` and `MiniGameBackend.java` (build infrastructure), `Pixmap.java` emu (cast fix) — none touch input logic.
+
+### Note: Observations
+
+- **getAvailablePointer() fallback of 0 is safe but worth documenting.** If all 20 pointers are somehow in use, overwriting pointer 0 could cause unexpected behavior. In practice this never happens on mobile devices (max 5–10 touch points). A logging warning could be added in a future iteration.
+
+- **touchMap is never cleared in reset().** This is correct — `reset()` clears per-frame state (deltas, justTouched), but ongoing touch tracking must persist across frames. The map entries are only removed on TOUCH_UP/CANCEL events.
+
+- **TOUCH_UP removes from touchMap before checking anyTouched.** The order is: `touchMap.remove(real)` → `touched[touchId] = false` → `anyTouched` check. Since the removed pointer's `touched[]` is already false by the time the check runs, the `anyTouched` loop correctly won't count it. ✅
+
+- **No issues found.** The implementation is correct, complete, and handles all edge cases properly.
+
+---
+
+## Review — 2026-05-01 (MiniGamePreferences — Load from Storage at Construction)
+
+### What's correct
+
+1. **`WX.getStorageInfoKeys()` binding is correct.** The `@JSBody(script = "return wx.getStorageInfoSync().keys;")` annotation:
+   - Has no `params` (correct — no parameters needed)
+   - Returns `String[]` (correct — `wx.getStorageInfoSync().keys` returns a string array)
+   - Is placed in the `// === Storage ===` section, grouped with `setStorageSync`/`getStorageSync`/`removeStorageSync` ✅
+   - Uses the correct WeChat Mini Game API (`wx.getStorageInfoSync()` is synchronous, matching the pattern of all other storage methods) ✅
+
+2. **Constructor loading logic matches WebPreferences exactly.** Side-by-side comparison:
+   - Iterates all storage keys (WX array vs. `storage.getLength()` loop) ✅
+   - Decodes hex if `shouldEncode` ✅
+   - Filters by `key.startsWith(this.prefix)` ✅
+   - Reads value from storage using the *encoded* key (`keyEncoded`) ✅
+   - Extracts the user key via `key.substring(prefixLength, key.length() - 1)` — strips prefix + type suffix ✅
+   - Calls `toObject()` with decoded value if `shouldEncode`, raw value otherwise ✅
+   - Stores into `values` map ✅
+
+3. **`toObject()` helper is identical to WebPreferences.** `diff` produces no output — byte-for-byte identical. Correctly handles all 5 types: `b`→Boolean, `i`→Integer, `l`→Long, `f`→Float, default→String ✅
+
+4. **Hex decode path is correct.** When `shouldEncode=true`, the raw storage key is hex-encoded. The code:
+   - Decodes the key to check prefix matching: `new String(HEXCoder.decode(keyEncoded))` ✅
+   - Reads the value using the *original encoded key*: `WX.getStorageSync(keyEncoded)` ✅
+   - Decodes the value for parsing: `new String(HEXCoder.decode(value))` ✅
+
+5. **Error handling clears values on failure.** The `catch(Exception e)` block calls `values.clear()` and prints the stack trace. This prevents partial/corrupt state from being exposed. ✅
+
+6. **Null safety for key array.** `if(allKeys != null)` guards against `getStorageInfoKeys()` returning null (possible if wx API returns undefined). ✅
+
+7. **`flush()` was NOT modified.** The diff confirms `flush()` is unchanged. It still writes all current values to WX storage correctly. ✅
+
+8. **Build verification passes:**
+   - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+   - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+9. **Only the two target files were changed for this feature.** `WX.java` (3 lines added) and `MiniGamePreferences.java` (40 lines changed). Other files in the commit (Pixmap, MiniGameGraphics, MiniGameInput, MiniGameBuildConfiguration, MiniGameBackend) are from the broader Phase 4+5 commit, not this fix. ✅
+
+### Note: Observations
+
+- **Pre-existing issue: `flush()` doesn't remove stale keys.** Unlike `WebPreferences.flush()` which first removes all old keys before writing new ones, `MiniGamePreferences.flush()` only writes current values. If a key was previously stored and then removed from the in-memory map (via `remove()`), it will linger in WX storage. This is a pre-existing issue, NOT introduced by this diff. Should be addressed in a follow-up.
+
+- **Key substring logic is correct but subtle.** `key.substring(prefixLength, key.length() - 1)` strips the type suffix (last char: b/i/l/f/s) to recover the original preference key. This matches `toStorageKey()` which appends a type suffix: `prefix + key + "b"`. The round-trip is: userKey → `prefix + userKey + "s"` → `substring(prefixLen, len-1)` → userKey. ✅
+
+- **No issues found with the implementation.** The loading logic is a faithful port of WebPreferences, adapted for WeChat's array-based key enumeration instead of index-based localStorage access.
+
+---
+
+## Review — 2026-05-01 (Audio Context Pooling Fix in MiniGameAudio.java)
+
+### What's correct
+
+1. **Pool architecture is well-designed.** The three-tier acquire strategy (idle pool → create new → steal oldest) is the correct pattern for managing WeChat's ~10 context limit. FIFO stealing via `active.removeIndex(0)` gives LRU eviction semantics.
+
+2. **SoundId tracking via `IntMap<WXAudioContext>` is correct.** Each `play()` call gets a unique monotonically-increasing `nextId++`, stored as the `int` key. All per-playback methods (`stop(id)`, `pause(id)`, `setVolume(id, ...)`) correctly look up the context from this map with null guards.
+
+3. **`onEnded` callback properly cleans up.** The natural-end callback removes from `activePlaybacks`, untracks from active list, and releases to pool. The cleanup chain is: `onEnded` → `activePlaybacks.remove(soundId)` + `untrackActive(ctx)` + `release(ctx)`.
+
+4. **`dispose()` correctly prevents future plays and stops all active.** `disposed = true` flag is checked at the top of `startPlayback()`, returning -1. Then `stop()` is called to release all active contexts.
+
+5. **Looping sounds work correctly.** `setLoop(looping)` is called before `ctx.play()`, so the WeChat runtime knows to loop from the start. `setLooping(soundId, looping)` can change loop state on an active playback.
+
+6. **MiniGameMusic is completely unchanged.** Only a cosmetic whitespace fix (`if(completionListener` → `if (completionListener`) and an added Javadoc comment. No logic changes.
+
+7. **Build verification passes:**
+   - `:backends:backend-minigame:compileJava` — BUILD SUCCESSFUL ✅
+   - `:backends:backend-web:compileJava` — BUILD SUCCESSFUL (no regression) ✅
+
+8. **Thread safety is not a concern.** libGDX is single-threaded on the render thread, and TeaVM/JS callbacks (`onEnded`) are dispatched on the same JS event loop, so no concurrent access issues.
+
+### Fixed: Critical Bugs
+
+#### Bug 1 (CRITICAL): Context stealing leaves stale references in previous owner's `activePlaybacks`
+
+**Problem:** When `acquire()` steals the oldest active context via `active.removeIndex(0)`, the previous `MiniGameSound` owner still has a stale `soundId → ctx` entry in its `activePlaybacks` IntMap. The old `onEnded` callback is silently replaced by the new one in `startPlayback()`, so the stale entry is never cleaned up. This causes:
+- If the old sound calls `stop()` or `stop(soundId)`, it releases a context now owned by a different sound — **killing the new playback**
+- The stale entry is a permanent memory leak in the old sound's map
+
+**Fix:** Added `ObjectMap<WXAudioContext, Runnable> stealCallbacks` to `MiniGameAudio`. Each `startPlayback()` registers a steal callback (`() -> activePlaybacks.remove(soundId)`) via `trackActive(ctx, onSteal)`. When `acquire()` steals a context, it invokes the callback to clean up the old owner's state before returning the context. `untrackActive()` and `release()` also clean up the steal callback.
+
+#### Bug 2 (MEDIUM): No guard against double-release into pool
+
+**Problem:** If `onEnded` fires after a manual `stop()` + `release()` call (edge case: audio ends in the same JS microtask), `release()` would call `pool.add(ctx)` for a context already in the pool, creating a duplicate. This could lead to the same context being acquired twice simultaneously.
+
+**Fix:** Added two defenses in `release()`:
+1. `ctx.onEnded(() -> {})` — clears the callback before stopping, preventing stale `onEnded` fires
+2. `if (pool.contains(ctx, true)) return;` — guards against double-add to pool
+
+### Note: Observations
+
+- **`nextId` long→int cast is safe.** The counter starts at 1 and increments per `play()`. Even at 60 plays/second, it would take ~1 year to overflow `int` (2^31). The same wrapping is applied consistently in both `startPlayback()` and all lookup methods, so it's self-consistent.
+
+- **`pool.contains()` is O(n) but acceptable.** `Array.contains()` scans the array, but `MAX_POOL_SIZE=10` makes this trivial. The alternative (using `ObjectSet`) would add complexity for no measurable performance gain.
+
+- **Steal scenario is a rare edge case.** Pool stealing only triggers when 10 contexts are simultaneously active (all playing) and an 11th play is requested. Most games play 2–4 concurrent SFX. But action games with rapid-fire sounds can hit this, making the fix important for robustness.
+
+- **Only MiniGameAudio.java was modified for this feature.** The diff also includes changes to other files (Pixmap, MiniGameGraphics, MiniGameInput, MiniGamePreferences, WX.java) from the broader commit, but those are unrelated to the audio pooling fix.

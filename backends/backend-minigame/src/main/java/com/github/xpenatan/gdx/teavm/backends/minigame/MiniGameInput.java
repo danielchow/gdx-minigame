@@ -6,13 +6,13 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.input.NativeInputConfiguration;
 import com.badlogic.gdx.utils.IntMap;
-import com.badlogic.gdx.utils.IntSet;
 import com.badlogic.gdx.utils.TimeUtils;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.TouchCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
+import org.teavm.jso.JSBody;
 import org.teavm.jso.JSObject;
-import org.teavm.jso.JSProperty;
 import org.teavm.jso.core.JSArrayReader;
+import org.teavm.jso.dom.events.Touch;
 import org.teavm.jso.dom.html.HTMLCanvasElement;
 
 /**
@@ -33,8 +33,8 @@ public class MiniGameInput extends AbstractInput {
     private int[] deltaX = new int[MAX_TOUCHES];
     private int[] deltaY = new int[MAX_TOUCHES];
 
-    private IntSet pressedKeys = new IntSet();
     private IntMap<Boolean> pressedButtons = new IntMap<>();
+    private IntMap<Integer> touchMap = new IntMap<>(20);
 
     private InputProcessor processor;
     private boolean justTouched = false;
@@ -56,61 +56,73 @@ public class MiniGameInput extends AbstractInput {
         WX.onTouchCancel((TouchCallback) event -> handleTouchEvent(event, 2));
     }
 
-    private native JSArrayReader<TouchJS> getChangedTouches(JSObject event) /*-{ return event.changedTouches; }-*/;
+    @JSBody(params = "event", script = "return event.changedTouches;")
+    private static native JSArrayReader<Touch> getChangedTouches(JSObject event);
+
+    private int getAvailablePointer() {
+        for (int i = 0; i < MAX_TOUCHES; i++) {
+            if (!touchMap.containsValue(i, false)) return i;
+        }
+        return 0;
+    }
 
     private void handleTouchEvent(JSObject event, int type) {
         currentEventTimeStamp = (int)(TimeUtils.nanoTime() / 1000000);
-        JSArrayReader<TouchJS> changedTouches = getChangedTouches(event);
+        JSArrayReader<Touch> changedTouches = getChangedTouches(event);
         if (changedTouches == null) return;
 
+        if (type == 0) justTouched = true;
+
         for (int i = 0; i < changedTouches.getLength(); i++) {
-            TouchJS touch = changedTouches.get(i);
-            int id = touch.getIdentifier();
-            int x = touch.getClientX();
-            int y = touch.getClientY();
+            Touch touch = changedTouches.get(i);
+            int real = touch.getIdentifier();
+            int x = (int) touch.getClientX();
+            int y = (int) touch.getClientY();
 
             if (type == 0) { // TOUCH_DOWN
-                if (id >= 0 && id < MAX_TOUCHES) {
-                    touched[id] = true;
-                    touchX[id] = x;
-                    touchY[id] = y;
-                    deltaX[id] = 0;
-                    deltaY[id] = 0;
-                }
-                justTouched = true;
-                pressedButtons.put(Input.Buttons.LEFT, true);
-                if (processor != null) processor.touchDown(x, y, 0, Input.Buttons.LEFT);
+                int touchId;
+                touchMap.put(real, touchId = getAvailablePointer());
+                touched[touchId] = true;
+                touchX[touchId] = x;
+                touchY[touchId] = y;
+                deltaX[touchId] = 0;
+                deltaY[touchId] = 0;
+                if (touchId == 0) pressedButtons.put(Input.Buttons.LEFT, true);
+                if (processor != null) processor.touchDown(x, y, touchId, Input.Buttons.LEFT);
             }
             else if (type == 1) { // TOUCH_MOVE
-                if (id >= 0 && id < MAX_TOUCHES) {
-                    deltaX[id] = x - touchX[id];
-                    deltaY[id] = y - touchY[id];
-                    touchX[id] = x;
-                    touchY[id] = y;
+                int touchId = touchMap.get(real, -1);
+                if (touchId >= 0) {
+                    deltaX[touchId] = x - touchX[touchId];
+                    deltaY[touchId] = y - touchY[touchId];
+                    touchX[touchId] = x;
+                    touchY[touchId] = y;
+                    if (processor != null) processor.touchDragged(x, y, touchId);
                 }
-                if (processor != null) processor.touchDragged(x, y, 0);
             }
-            else { // TOUCH_UP
-                if (id >= 0 && id < MAX_TOUCHES) {
-                    touched[id] = false;
-                    deltaX[id] = x - touchX[id];
-                    deltaY[id] = y - touchY[id];
-                    touchX[id] = x;
-                    touchY[id] = y;
+            else { // TOUCH_UP / TOUCH_CANCEL
+                Integer touchIdObj = touchMap.get(real);
+                if (touchIdObj != null) {
+                    int touchId = touchIdObj;
+                    touchMap.remove(real);
+                    touched[touchId] = false;
+                    deltaX[touchId] = x - touchX[touchId];
+                    deltaY[touchId] = y - touchY[touchId];
+                    touchX[touchId] = x;
+                    touchY[touchId] = y;
+                    if (processor != null) processor.touchUp(x, y, touchId, Input.Buttons.LEFT);
+                    if (touchId == 0) {
+                        boolean anyTouched = false;
+                        for (int j = 0; j < MAX_TOUCHES; j++) if (touched[j]) { anyTouched = true; break; }
+                        if (!anyTouched) pressedButtons.remove(Input.Buttons.LEFT);
+                    }
                 }
-                if (processor != null) processor.touchUp(x, y, 0, Input.Buttons.LEFT);
-                pressedButtons.remove(Input.Buttons.LEFT);
             }
             mouseLastX = x;
             mouseLastY = y;
         }
     }
 
-    interface TouchJS extends JSObject {
-        @JSProperty int getIdentifier();
-        @JSProperty int getClientX();
-        @JSProperty int getClientY();
-    }
 
     // === AbstractInput / Input implementation ===
 

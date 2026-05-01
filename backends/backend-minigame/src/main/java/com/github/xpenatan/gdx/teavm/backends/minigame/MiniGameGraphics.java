@@ -188,10 +188,10 @@ public class MiniGameGraphics implements Graphics {
     // === Density & PPI ===
 
     @Override
-    public float getPpiX() { return 96f * (float) getDensity(); }
+    public float getPpiX() { return 96f * (float) getNativeScreenDensity(); }
 
     @Override
-    public float getPpiY() { return 96f * (float) getDensity(); }
+    public float getPpiY() { return 96f * (float) getNativeScreenDensity(); }
 
     @Override
     public float getPpcX() { return getPpiX() / 2.54f; }
@@ -233,10 +233,9 @@ public class MiniGameGraphics implements Graphics {
 
     @Override
     public DisplayMode getDisplayMode() {
-        double density = config.usePhysicalPixels ? getNativeScreenDensity() : 1;
         return new DisplayMode(
-                (int) (WX.getScreenWidth() * density),
-                (int) (WX.getScreenHeight() * density), 60, 8) {};
+                canvas.getWidth(),
+                canvas.getHeight(), 60, 8) {};
     }
 
     @Override
