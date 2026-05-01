@@ -96,7 +96,7 @@ public final class WX {
     public static native void onShow(LifecycleCallback callback);
 
     @JSBody(params = "callback", script = "wx.onHide(callback);")
-    public static native void onHide(Runnable callback);
+    public static native void onHide(OnHideCallback callback);
 
     // === Clipboard ===
 

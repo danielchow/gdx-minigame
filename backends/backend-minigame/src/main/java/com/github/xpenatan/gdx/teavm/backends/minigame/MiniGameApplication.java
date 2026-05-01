@@ -16,12 +16,16 @@ import com.badlogic.gdx.utils.Clipboard;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.OnHideCallback;
+import com.github.xpenatan.gdx.teavm.backends.minigame.dom.typedarray.TypedArrays;
 import com.github.xpenatan.jmultiplatform.core.JMultiplatform;
 import com.github.xpenatan.jmultiplatform.core.JPlatformMap;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSExceptions;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.browser.AnimationFrameCallback;
+import org.teavm.jso.typedarrays.ArrayBuffer;
+import org.teavm.jso.typedarrays.Int8Array;
 
 import java.util.ArrayList;
 
@@ -105,6 +109,7 @@ public class MiniGameApplication implements Application {
         graphics = createGraphics(config);
         input = new MiniGameInput(this, graphics.canvas);
         files = new MiniGameFiles(config, this);
+        preloadAssetsIntoStorage();
         net = new MiniGameNet();
         logger = new WebApplicationLogger();
         clipboard = new MiniGameClipboard();
@@ -124,7 +129,7 @@ public class MiniGameApplication implements Application {
         Gdx.audio = audio;
 
         // Lifecycle: wx.onHide → pause
-        WX.onHide(() -> {
+        WX.onHide((OnHideCallback) () -> {
             if (initState == AppState.APP_LOOP) {
                 synchronized (lifecycleListeners) {
                     for (LifecycleListener listener : lifecycleListeners) {
@@ -267,6 +272,49 @@ public class MiniGameApplication implements Application {
 
     @JSBody(script = "return globalThis.canvas;")
     private static native JSObject getGlobalCanvas();
+
+    // === Asset preloading ===
+
+    @JSBody(script = "return globalThis.__preloadedAssets ? Object.keys(globalThis.__preloadedAssets).length : 0;")
+    private static native int getPreloadedAssetCount();
+
+    @JSBody(params = "index", script = "var keys = Object.keys(globalThis.__preloadedAssets); return keys[index] || null;")
+    private static native String getPreloadedAssetPath(int index);
+
+    @JSBody(params = "path", script = "var entry = globalThis.__preloadedAssets[path]; return entry ? entry.type : null;")
+    private static native String getPreloadedAssetType(String path);
+
+    @JSBody(params = "path", script = "var entry = globalThis.__preloadedAssets[path]; if (!entry || !entry.data) return null; return entry.data;")
+    private static native ArrayBuffer getPreloadedAssetArrayBuffer(String path);
+
+    @JSBody(script = "delete globalThis.__preloadedAssets;")
+    private static native void clearPreloadedAssets();
+
+    private void preloadAssetsIntoStorage() {
+        int count = getPreloadedAssetCount();
+        if (count == 0) {
+            System.out.println("[MiniGameApplication] No preloaded assets found");
+            return;
+        }
+        System.out.println("[MiniGameApplication] Preloading " + count + " assets into InternalStorage...");
+        for (int i = 0; i < count; i++) {
+            String path = getPreloadedAssetPath(i);
+            if (path == null) continue;
+            String type = getPreloadedAssetType(path);
+            if ("dir".equals(type)) {
+                files.internalStorage.putFolderInternal(path);
+            } else {
+                ArrayBuffer arrayBuffer = getPreloadedAssetArrayBuffer(path);
+                if (arrayBuffer != null) {
+                    Int8Array int8Array = new Int8Array(arrayBuffer);
+                    byte[] bytes = TypedArrays.toByteArray(int8Array);
+                    files.internalStorage.putFileInternal(path, bytes);
+                }
+            }
+        }
+        System.out.println("[MiniGameApplication] Asset preloading complete");
+        clearPreloadedAssets();
+    }
 
     // === Native library loading ===
 
