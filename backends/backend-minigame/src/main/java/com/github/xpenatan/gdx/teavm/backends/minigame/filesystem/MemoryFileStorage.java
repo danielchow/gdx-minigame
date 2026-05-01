@@ -348,6 +348,7 @@ public class MemoryFileStorage extends FileDB {
     }
 
     final public void putFileInternal(String path, byte[] bytes, boolean callMethod) {
+        path = fixPath(path);
         if(debug) {
             String pathStr = "\"" + path + "\"";
             System.out.println(getClass().getSimpleName() + " PUT FILE: " + pathStr + " Bytes: " + bytes.length);
@@ -367,6 +368,7 @@ public class MemoryFileStorage extends FileDB {
     }
 
     final public void putFolderInternal(String path, boolean callMethod) {
+        path = fixPath(path);
         if(debug) {
             String pathStr = "\"" + path + "\"";
             System.out.println(getClass().getSimpleName() + " PUT FOLDER: " + pathStr);
