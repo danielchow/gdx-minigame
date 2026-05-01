@@ -12,6 +12,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.Base64;
 import org.teavm.tooling.TeaVMTargetType;
 
 /**
@@ -168,7 +171,7 @@ public class MiniGameBackend extends TeaBackend {
             "                }\n" +
             "                await new Promise(r => setTimeout(r, 50));\n" +
             "            }\n" +
-            "        } catch(e) { if (e.message && e.message.indexOf('Timed out') >= 0) throw e; }\n\n" +
+            "        } catch(e) { console.error('WASM init failed:', e); throw e; }\n\n" +
             "        // Start the compiled game\n" +
             "        const mainModule = require('./" + data.outputName + ".js');\n" +
             "        if (mainModule && mainModule.main) {\n" +
@@ -235,7 +238,8 @@ public class MiniGameBackend extends TeaBackend {
             "    var originalInstantiate = WebAssembly.instantiate;\n" +
             "    WebAssembly.instantiate = function(source, imports) {\n" +
             "        if (source instanceof ArrayBuffer || source instanceof Uint8Array) {\n" +
-            "            return WXWebAssembly.instantiate('scripts/gdx.wasm', imports);\n" +
+            "            return WXWebAssembly.instantiate('scripts/gdx.wasm', imports)\n" +
+            "                .then(function(instance) { return { module: null, instance: instance }; });\n" +
             "        }\n" +
             "        return originalInstantiate ? originalInstantiate(source, imports) : Promise.reject(new Error('No WASM support'));\n" +
             "    };\n" +
@@ -385,6 +389,39 @@ public class MiniGameBackend extends TeaBackend {
         }
     }
 
+    /**
+     * Extract embedded WASM binary from gdx.wasm.js and write it as scripts/gdx.wasm.
+     * The JS file contains base64 WASM data in a data URL like:
+     *   O="data:application/octet-stream;base64,AGFzbQ..."
+     * We parse this out, decode the base64, and write the raw bytes as a .wasm file
+     * so WXWebAssembly.instantiate('scripts/gdx.wasm', imports) can find it.
+     */
+    private void extractWasmFromJs() {
+        FileHandle scriptsFolder = releasePath.child("scripts");
+        FileHandle wasmJs = scriptsFolder.child("gdx.wasm.js");
+        if (!wasmJs.exists()) {
+            System.out.println("[MiniGameBackend] WARNING: gdx.wasm.js not found, skipping WASM extraction");
+            return;
+        }
+        try {
+            String content = wasmJs.readString();
+            Pattern pattern = Pattern.compile("\"data:application/octet-stream;base64,([A-Za-z0-9+/=]+)\"");
+            Matcher matcher = pattern.matcher(content);
+            if (!matcher.find()) {
+                System.out.println("[MiniGameBackend] WARNING: Could not find base64 WASM data in gdx.wasm.js");
+                return;
+            }
+            String base64Data = matcher.group(1);
+            byte[] wasmBytes = Base64.getDecoder().decode(base64Data);
+            FileHandle wasmFile = scriptsFolder.child("gdx.wasm");
+            wasmFile.writeBytes(wasmBytes, false);
+            System.out.println("[MiniGameBackend] Extracted gdx.wasm (" + wasmBytes.length + " bytes) from gdx.wasm.js");
+        } catch (Exception e) {
+            System.out.println("[MiniGameBackend] ERROR: Failed to extract WASM from gdx.wasm.js: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     @Override
     protected void copyAssets(TeaCompilerData data) {
         super.copyAssets(data);
@@ -395,5 +432,8 @@ public class MiniGameBackend extends TeaBackend {
 
         // Generate subpackage entry files required by WeChat
         generateSubpackageEntryFiles();
+
+        // Extract WASM binary from embedded base64 in gdx.wasm.js
+        extractWasmFromJs();
     }
 }
