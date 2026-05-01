@@ -80,6 +80,9 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     private void setupMinigame(TeaCompilerData data) {
+        if (appId == null || appId.isEmpty()) {
+            System.out.println("[MiniGameBackend] WARNING: appId is empty. Set via setAppId() for production builds.");
+        }
         generateGameJson();
         generateProjectConfigJson();
         generateGameJs(data);
@@ -100,7 +103,6 @@ public class MiniGameBackend extends TeaBackend {
             "    },\n" +
             "    \"subpackages\": [\n" +
             "        { \"name\": \"engine\", \"root\": \"scripts/\" },\n" +
-            "        { \"name\": \"game\", \"root\": \"game-code/\" },\n" +
             "        { \"name\": \"assets\", \"root\": \"assets/\" }\n" +
             "    ]\n" +
             "}\n";
@@ -158,15 +160,15 @@ public class MiniGameBackend extends TeaBackend {
             "        // Load gdx.wasm.js (sets window.Gdx ASYNC via self-execution)\n" +
             "        try {\n" +
             "            require('./scripts/gdx.wasm.js');\n" +
-            "            // Wait for Gdx to be available\n" +
+            "            // Wait for Gdx to be available (with timeout)\n" +
+            "            var gdxWaitStart = Date.now();\n" +
             "            while (typeof window.Gdx === 'undefined') {\n" +
+            "                if (Date.now() - gdxWaitStart > 30000) {\n" +
+            "                    throw new Error('Timed out waiting for Gdx to initialize (30s)');\n" +
+            "                }\n" +
             "                await new Promise(r => setTimeout(r, 50));\n" +
             "            }\n" +
-            "        } catch(e) { /* optional */ }\n\n" +
-            "        // Load game code\n" +
-            "        if (typeof wx.loadSubpackage === 'function') {\n" +
-            "            await wx.loadSubpackage({ name: 'game' }).promise;\n" +
-            "        }\n\n" +
+            "        } catch(e) { if (e.message && e.message.indexOf('Timed out') >= 0) throw e; }\n\n" +
             "        // Start the compiled game\n" +
             "        const mainModule = require('./" + data.outputName + ".js');\n" +
             "        if (mainModule && mainModule.main) {\n" +
@@ -207,19 +209,37 @@ public class MiniGameBackend extends TeaBackend {
             "    globalThis.window = window;\n" +
             "}\n\n" +
             "// === WebAssembly patch ===\n" +
-            "if (typeof WXWebAssembly !== 'undefined' && typeof WebAssembly !== 'undefined') {\n" +
+            "if (typeof WXWebAssembly !== 'undefined') {\n" +
+            "    if (typeof WebAssembly === 'undefined') {\n" +
+            "        globalThis.WebAssembly = {};\n" +
+            "    }\n" +
             "    var originalInstantiate = WebAssembly.instantiate;\n" +
             "    WebAssembly.instantiate = function(source, imports) {\n" +
             "        if (source instanceof ArrayBuffer || source instanceof Uint8Array) {\n" +
             "            return WXWebAssembly.instantiate('scripts/gdx.wasm', imports);\n" +
             "        }\n" +
-            "        return originalInstantiate(source, imports);\n" +
+            "        return originalInstantiate ? originalInstantiate(source, imports) : Promise.reject(new Error('No WASM support'));\n" +
             "    };\n" +
             "}\n\n" +
             "// === atob polyfill ===\n" +
             "if (typeof atob === 'undefined') {\n" +
             "    var atob = function(base64) {\n" +
-            "        return Buffer.from(base64, 'base64').toString('binary');\n" +
+            "        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n" +
+            "        var lookup = {};\n" +
+            "        for (var i = 0; i < chars.length; i++) lookup[chars[i]] = i;\n" +
+            "        var output = '';\n" +
+            "        var buffer = 0, bufferLen = 0;\n" +
+            "        for (var j = 0; j < base64.length; j++) {\n" +
+            "            var ch = base64.charAt(j);\n" +
+            "            if (ch === '=') break;\n" +
+            "            buffer = (buffer << 6) | lookup[ch];\n" +
+            "            bufferLen += 6;\n" +
+            "            if (bufferLen >= 8) {\n" +
+            "                bufferLen -= 8;\n" +
+            "                output += String.fromCharCode((buffer >> bufferLen) & 0xFF);\n" +
+            "            }\n" +
+            "        }\n" +
+            "        return output;\n" +
             "    };\n" +
             "    globalThis.atob = atob;\n" +
             "}\n\n" +
@@ -230,7 +250,86 @@ public class MiniGameBackend extends TeaBackend {
             "}\n\n" +
             "exports.setup = function(canvas) {\n" +
             "    globalThis.canvas = canvas;\n" +
-            "};\n";
+            "};\n\n" +
+            "// === XMLHttpRequest polyfill (wraps wx.request) ===\n" +
+            "if (typeof XMLHttpRequest === 'undefined') {\n" +
+            "    var XHR = function() {\n" +
+            "        this.readyState = 0;\n" +
+            "        this.status = 0;\n" +
+            "        this.statusText = '';\n" +
+            "        this.responseText = '';\n" +
+            "        this.response = '';\n" +
+            "        this.responseType = '';\n" +
+            "        this.responseHeaders = {};\n" +
+            "        this._method = '';\n" +
+            "        this._url = '';\n" +
+            "        this._headers = {};\n" +
+            "        this._async = true;\n" +
+            "        this.onreadystatechange = null;\n" +
+            "        this.onerror = null;\n" +
+            "        this.onload = null;\n" +
+            "    };\n" +
+            "    XHR.UNSENT = 0;\n" +
+            "    XHR.OPENED = 1;\n" +
+            "    XHR.HEADERS_RECEIVED = 2;\n" +
+            "    XHR.LOADING = 3;\n" +
+            "    XHR.DONE = 4;\n" +
+            "    XHR.prototype.open = function(method, url, async) {\n" +
+            "        this._method = method;\n" +
+            "        this._url = url;\n" +
+            "        this._async = (async !== false);\n" +
+            "        this.readyState = XHR.OPENED;\n" +
+            "    };\n" +
+            "    XHR.prototype.setRequestHeader = function(name, value) {\n" +
+            "        this._headers[name] = value;\n" +
+            "    };\n" +
+            "    XHR.prototype.send = function(data) {\n" +
+            "        var self = this;\n" +
+            "        var opts = {\n" +
+            "            url: self._url,\n" +
+            "            method: self._method,\n" +
+            "            header: self._headers,\n" +
+            "            data: (data !== undefined && data !== null) ? data : undefined,\n" +
+            "            dataType: 'text',\n" +
+            "            success: function(res) {\n" +
+            "                self.status = res.statusCode;\n" +
+            "                self.statusText = '';\n" +
+            "                self.responseText = (typeof res.data === 'string') ? res.data : JSON.stringify(res.data);\n" +
+            "                self.response = self.responseText;\n" +
+            "                self.responseHeaders = res.header || {};\n" +
+            "                self.readyState = XHR.HEADERS_RECEIVED;\n" +
+            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
+            "                self.readyState = XHR.LOADING;\n" +
+            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
+            "                self.readyState = XHR.DONE;\n" +
+            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
+            "                if (self.onload) self.onload();\n" +
+            "            },\n" +
+            "            fail: function(err) {\n" +
+            "                self.status = 0;\n" +
+            "                self.readyState = XHR.DONE;\n" +
+            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
+            "                if (self.onerror) self.onerror(err);\n" +
+            "            }\n" +
+            "        };\n" +
+            "        wx.request(opts);\n" +
+            "    };\n" +
+            "    XHR.prototype.abort = function() {};\n" +
+            "    XHR.prototype.getAllResponseHeaders = function() {\n" +
+            "        var result = '';\n" +
+            "        for (var k in this.responseHeaders) {\n" +
+            "            if (this.responseHeaders.hasOwnProperty(k)) {\n" +
+            "                result += k + ': ' + this.responseHeaders[k] + '\\r\\n';\n" +
+            "            }\n" +
+            "        }\n" +
+            "        return result;\n" +
+            "    };\n" +
+            "    XHR.prototype.getResponseHeader = function(name) {\n" +
+            "        return this.responseHeaders[name] || null;\n" +
+            "    };\n" +
+            "    XHR.prototype.overrideMimeType = function() {};\n" +
+            "    globalThis.XMLHttpRequest = XHR;\n" +
+            "}\n";
 
         FileHandle adapterJs = adapterDir.child("index.js");
         adapterJs.writeString(js, false);
