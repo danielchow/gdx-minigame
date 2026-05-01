@@ -336,6 +336,16 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     /**
+     * Generate stub game.js in each subpackage root directory.
+     * WeChat requires <root>/game.js as the subpackage entry point.
+     */
+    private void generateSubpackageEntryFiles() {
+        String stub = "// Subpackage entry — loaded by wx.loadSubpackage()\n";
+        releasePath.child("scripts/game.js").writeString(stub, false);
+        releasePath.child("assets/game.js").writeString(stub, false);
+    }
+
+    /**
      * Fix freetype.js Module scoping — inject globalThis.Module = Module
      * so that compiled code can access it.
      */
@@ -363,5 +373,8 @@ public class MiniGameBackend extends TeaBackend {
         // Copy scripts to scripts/ directory
         FileHandle scriptsFolder = releasePath.child("scripts");
         AssetsCopy.copyResources(classLoader, scripts, scriptFilter, scriptsFolder);
+
+        // Generate subpackage entry files required by WeChat
+        generateSubpackageEntryFiles();
     }
 }
