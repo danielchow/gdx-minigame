@@ -18,6 +18,7 @@ public class MiniGamePreferences implements Preferences {
 
     final String prefix;
     ObjectMap<String, Object> values = new ObjectMap<String, Object>();
+    private final com.badlogic.gdx.utils.Array<String> removedKeys = new com.badlogic.gdx.utils.Array<>();
     private boolean shouldEncode;
 
     public MiniGamePreferences(String prefix, boolean shouldEncode) {
@@ -81,6 +82,20 @@ public class MiniGamePreferences implements Preferences {
     @Override
     public void flush() {
         try {
+            // Remove deleted keys from WX storage
+            for (int i = 0; i < removedKeys.size; i++) {
+                String key = removedKeys.get(i);
+                String[] suffixes = {"b", "i", "l", "f", "s"};
+                for (String suffix : suffixes) {
+                    String storageKey = prefix + key + suffix;
+                    if (shouldEncode) {
+                        storageKey = HEXCoder.encode(storageKey.getBytes());
+                    }
+                    WX.removeStorageSync(storageKey);
+                }
+            }
+            removedKeys.clear();
+
             // Write all values to WX storage
             for(String key : values.keys()) {
                 Object val = values.get(key);
@@ -206,11 +221,15 @@ public class MiniGamePreferences implements Preferences {
 
     @Override
     public void clear() {
+        for (String key : values.keys()) {
+            removedKeys.add(key);
+        }
         values.clear();
     }
 
     @Override
     public void remove(String key) {
         values.remove(key);
+        removedKeys.add(key);
     }
 }

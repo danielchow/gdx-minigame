@@ -43,9 +43,16 @@ public class MiniGameInput extends AbstractInput {
     private int mouseLastY = 0;
     private int currentEventTimeStamp = 0;
 
+    // Cached scale factors for touch coordinate mapping
+    private float touchScaleX;
+    private float touchScaleY;
+
     public MiniGameInput(MiniGameApplication app, HTMLCanvasElement canvas) {
         this.app = app;
         this.canvas = canvas;
+        // Cache scale factors: canvas physical pixels / CSS pixels
+        touchScaleX = (float) canvas.getWidth() / (float) WX.getScreenWidth();
+        touchScaleY = (float) canvas.getHeight() / (float) WX.getScreenHeight();
         setupTouchEvents();
     }
 
@@ -76,8 +83,8 @@ public class MiniGameInput extends AbstractInput {
         for (int i = 0; i < changedTouches.getLength(); i++) {
             Touch touch = changedTouches.get(i);
             int real = touch.getIdentifier();
-            int x = (int) touch.getClientX();
-            int y = (int) touch.getClientY();
+            int x = Math.round((float) touch.getClientX() * touchScaleX);
+            int y = Math.round((float) touch.getClientY() * touchScaleY);
 
             if (type == 0) { // TOUCH_DOWN
                 int touchId;

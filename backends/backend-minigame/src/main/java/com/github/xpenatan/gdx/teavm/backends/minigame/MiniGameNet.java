@@ -8,7 +8,6 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSFunctor;
 import org.teavm.jso.JSObject;
-import org.teavm.jso.browser.Window;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

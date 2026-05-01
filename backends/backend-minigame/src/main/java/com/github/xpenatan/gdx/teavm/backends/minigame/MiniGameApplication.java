@@ -48,6 +48,7 @@ public class MiniGameApplication implements Application {
     private MiniGameInput input;
     private MiniGameFiles files;
     private MiniGameNet net;
+    private MiniGameAudio audio;
     private MiniGameApplicationConfiguration config;
     private ApplicationListener appListener;
     private ApplicationListener curListener;
@@ -96,6 +97,11 @@ public class MiniGameApplication implements Application {
         map.put(WEB_SCRIPT_PATH, "scripts/");
         map.put(WEB_ASSET_PATH, "assets/");
 
+        // Set canvas from globalThis.canvas if not already configured
+        if (config.canvas == null) {
+            config.canvas = getGlobalCanvas();
+        }
+
         graphics = createGraphics(config);
         input = new MiniGameInput(this, graphics.canvas);
         files = new MiniGameFiles(config, this);
@@ -114,7 +120,8 @@ public class MiniGameApplication implements Application {
         Gdx.input = input;
         Gdx.files = files;
         Gdx.net = net;
-        Gdx.audio = new MiniGameAudio();
+        this.audio = new MiniGameAudio();
+        Gdx.audio = audio;
 
         // Lifecycle: wx.onHide → pause
         WX.onHide(() -> {
@@ -258,6 +265,9 @@ public class MiniGameApplication implements Application {
     @JSBody(params = "text", script = "console.log(text);")
     public static native void print(String text);
 
+    @JSBody(script = "return globalThis.canvas;")
+    private static native JSObject getGlobalCanvas();
+
     // === Native library loading ===
 
     private void initNativeLibraries() {
@@ -291,7 +301,7 @@ public class MiniGameApplication implements Application {
 
     @Override
     public Audio getAudio() {
-        return null;
+        return audio;
     }
 
     @Override

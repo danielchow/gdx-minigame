@@ -94,7 +94,7 @@ public abstract class FileDB {
         FileHandle[] list = list(file);
         List<FileHandle> filtered = new ArrayList<FileHandle>(list.length);
         for(FileHandle f : list) {
-            if(file.path().endsWith(suffix)) {
+            if(f.path().endsWith(suffix)) {
                 filtered.add(f);
             }
         }

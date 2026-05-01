@@ -355,7 +355,7 @@ public class MiniGameAudio implements Audio {
 
         @Override
         public boolean isLooping() {
-            return false; // No getter available
+            return audioContext.getLoop();
         }
 
         @Override

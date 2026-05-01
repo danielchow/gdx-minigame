@@ -19,6 +19,9 @@ public interface WXAudioContext extends JSObject {
     void setLoop(boolean loop);
 
     @JSProperty
+    boolean getLoop();
+
+    @JSProperty
     void setVolume(double volume);
 
     @JSProperty
