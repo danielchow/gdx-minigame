@@ -122,15 +122,18 @@ public abstract class TeaBackend {
         // 0 - TeaVM backend - Contains all teavm api stuff to make it work.
         // 1 - Extensions - Emulate native extension classes
 //
-//        final String EXTENSION_FREETYPE = "gdx-freetype-teavm";
-//        final String EXTENSION_BOX2D_GWT = "gdx-box2d-gwt";
-//
-//        // TODO make a better sort. Lazy to do it now
-//        // Move extensions to be first so native classes are replaced by the emulated classes
-//        makeClassPathFirst(acceptedURL, EXTENSION_FREETYPE);
-//        makeClassPathFirst(acceptedURL, EXTENSION_BOX2D_GWT);
-//        // Move generic backend to be first
-//        makeClassPathFirst(acceptedURL, "backend-teavm");
+        final String EXTENSION_FREETYPE = "gdx-freetype-teavm";
+        final String EXTENSION_BOX2D = "gdx-box2d-teavm";
+        final String EXTENSION_BOX2D_GWT = "gdx-box2d-gwt";
+
+        // Move extensions to be first so native classes are replaced by the emulated classes
+        makeClassPathFirst(acceptedURL, EXTENSION_FREETYPE);
+        makeClassPathFirst(acceptedURL, EXTENSION_BOX2D);
+        makeClassPathFirst(acceptedURL, EXTENSION_BOX2D_GWT);
+        // Move generic backend to be first
+        makeClassPathFirst(acceptedURL, "backend-teavm");
+        // Move minigame backend to be first
+        makeClassPathFirst(acceptedURL, "backend-minigame");
     }
 
     private void makeClassPathFirst(ArrayList<URL> acceptedURL, String module) {
