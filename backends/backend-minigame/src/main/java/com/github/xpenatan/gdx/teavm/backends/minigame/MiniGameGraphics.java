@@ -49,6 +49,17 @@ public class MiniGameGraphics implements Graphics {
         this.config = config;
         this.canvas = (HTMLCanvasElement) config.canvas;
 
+        // Scale canvas to physical pixels for proper viewport sizing
+        // (wx.createCanvas() returns logical pixels, but game expects physical pixels
+        //  like the web backend provides)
+        double pixelRatio = WX.getPixelRatio();
+        if (pixelRatio > 1.0) {
+            int w = (int)(canvas.getWidth() * pixelRatio);
+            int h = (int)(canvas.getHeight() * pixelRatio);
+            canvas.setWidth(w);
+            canvas.setHeight(h);
+        }
+
         WebGLContextAttributesExt attr = (WebGLContextAttributesExt) WebGLContextAttributes.create();
         attr.setAlpha(config.alpha);
         attr.setAntialias(config.antialiasing);
@@ -314,13 +325,24 @@ public class MiniGameGraphics implements Graphics {
     }
 
     @Override
-    public int getSafeInsetLeft() { return 0; }
+    public int getSafeInsetLeft() {
+        return (int)(WX.getSafeAreaLeft() * WX.getPixelRatio());
+    }
+
     @Override
-    public int getSafeInsetTop() { return 0; }
+    public int getSafeInsetTop() {
+        return (int)(WX.getSafeAreaTop() * WX.getPixelRatio());
+    }
+
     @Override
-    public int getSafeInsetBottom() { return 0; }
+    public int getSafeInsetBottom() {
+        return (int)(WX.getSafeAreaBottom() * WX.getPixelRatio());
+    }
+
     @Override
-    public int getSafeInsetRight() { return 0; }
+    public int getSafeInsetRight() {
+        return (int)(WX.getSafeAreaRight() * WX.getPixelRatio());
+    }
 
     static class TeaMonitor extends Monitor {
         protected TeaMonitor(int virtualX, int virtualY, String name) {
