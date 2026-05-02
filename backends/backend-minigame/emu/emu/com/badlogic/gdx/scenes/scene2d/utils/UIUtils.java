@@ -3,23 +3,16 @@ package emu.com.badlogic.gdx.scenes.scene2d.utils;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Buttons;
 import com.badlogic.gdx.Input.Keys;
-import org.teavm.jso.JSBody;
+import com.github.xpenatan.gdx.teavm.backends.minigame.dom.MiniGameNavigator;
 
 public class UIUtils {
 
-    private static String getPlatform() {
-        return getPlatformNative();
-    }
-
-    @JSBody(script = "return wx.getSystemInfoSync().platform;")
-    private static native String getPlatformNative();
-
-    static public boolean isAndroid = getPlatform().contains("Android");
-    static public boolean isMac = getPlatform().contains("Mac");
-    static public boolean isWindows = getPlatform().contains("Win");
-    static public boolean isLinux = getPlatform().contains("Linux") || getPlatform().contains("FreeBSD");
-    static public boolean isIos = getPlatform().contains("iPhone") || getPlatform().contains("iPod")
-            || getPlatform().contains("iPad");
+    static public boolean isAndroid = MiniGameNavigator.getPlatform().contains("Android");
+    static public boolean isMac = MiniGameNavigator.getPlatform().contains("Mac");
+    static public boolean isWindows = MiniGameNavigator.getPlatform().contains("Win");
+    static public boolean isLinux = MiniGameNavigator.getPlatform().contains("Linux") || MiniGameNavigator.getPlatform().contains("FreeBSD");
+    static public boolean isIos = MiniGameNavigator.getPlatform().contains("iPhone") || MiniGameNavigator.getPlatform().contains("iPod")
+            || MiniGameNavigator.getPlatform().contains("iPad");
 
     static public boolean left() {
         return Gdx.input.isButtonPressed(Buttons.LEFT);
