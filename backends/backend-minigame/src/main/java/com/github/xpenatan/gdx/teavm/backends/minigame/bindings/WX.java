@@ -19,17 +19,31 @@ public final class WX {
 
     // === System Info ===
 
-    @JSBody(script = "return wx.getSystemInfoSync().pixelRatio;")
+    @JSBody(script = "return wx.getWindowInfo().pixelRatio;")
     public static native double getPixelRatio();
 
-    @JSBody(script = "return wx.getSystemInfoSync().screenWidth;")
+    @JSBody(script = "return wx.getWindowInfo().screenWidth;")
     public static native double getScreenWidth();
 
-    @JSBody(script = "return wx.getSystemInfoSync().screenHeight;")
+    @JSBody(script = "return wx.getWindowInfo().screenHeight;")
     public static native double getScreenHeight();
 
-    @JSBody(script = "return wx.getSystemInfoSync().platform;")
+    @JSBody(script = "return wx.getDeviceInfo().platform;")
     public static native String getPlatform();
+
+    // === Safe Area ===
+
+    @JSBody(script = "var sa = wx.getWindowInfo().safeArea; return sa ? sa.top : 0;")
+    public static native double getSafeAreaTop();
+
+    @JSBody(script = "var sa = wx.getWindowInfo().safeArea; var wi = wx.getWindowInfo(); return sa ? (wi.screenHeight - sa.bottom) : 0;")
+    public static native double getSafeAreaBottom();
+
+    @JSBody(script = "var sa = wx.getWindowInfo().safeArea; return sa ? sa.left : 0;")
+    public static native double getSafeAreaLeft();
+
+    @JSBody(script = "var sa = wx.getWindowInfo().safeArea; var wi = wx.getWindowInfo(); return sa ? (wi.screenWidth - sa.right) : 0;")
+    public static native double getSafeAreaRight();
 
     // === Animation Frame ===
 
