@@ -1,0 +1,16 @@
+> Source: https://developers.weixin.qq.com/minigame/dev/api/network/tcp/TCPSocket.close.html
+# TCPSocket.close()
+**微信 Windows 版**：支持
+
+**微信 Mac 版**：支持
+
+**微信 鸿蒙 OS 版**：支持
+
+相关文档: [网络使用说明](../../../guide/base-ability/network.html)
+## 功能描述
+关闭连接
+## 示例代码
+```javascript
+const tcp = wx.createTCPSocket()
+  tcp.close()
+```
