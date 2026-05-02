@@ -186,7 +186,9 @@ public class MiniGameBackend extends TeaBackend {
             "        }\n" +
             "        // Preload assets from filesystem into memory\n" +
             "        console.log('[game.js] Step 7c: Preloading assets...');\n" +
-            "        adapter.preloadAssets();\n" +
+            "        await adapter.preloadAssets(function(loaded, total) {\n" +
+            "            console.log('[game.js] Preload progress: ' + loaded + '/' + total);\n" +
+            "        });\n" +
             "        console.log('[game.js] Step 7d: Assets preloaded, count:', globalThis.__preloadedAssets ? Object.keys(globalThis.__preloadedAssets).length : 0);\n\n" +
             "        // Load freetype.js (sets globalThis.Module synchronously)\n" +
             "        try { console.log('[game.js] Step 8: Requiring freetype.js...'); require('./freetype.js'); console.log('[game.js] Step 9: freetype.js loaded'); } catch(e) { console.log('[game.js] Step 9: freetype.js skipped:', e.message); }\n\n" +
@@ -323,7 +325,7 @@ public class MiniGameBackend extends TeaBackend {
             "// === Asset preloader ===\n" +
             "var __preloadedAssets = {};\n" +
             "globalThis.__preloadedAssets = __preloadedAssets;\n\n" +
-            "exports.preloadAssets = function() {\n" +
+            "exports.preloadAssets = async function(onProgress) {\n" +
             "    try {\n" +
             "        var fs = wx.getFileSystemManager();\n" +
             "        var renameMap = {};\n" +
@@ -341,6 +343,7 @@ public class MiniGameBackend extends TeaBackend {
             "            console.log('[adapter] preloadAssets: No manifest file, skipping');\n" +
             "            return;\n" +
             "        }\n" +
+            "        var files = [];\n" +
             "        var lines = manifest.split('\\n');\n" +
             "        for (var i = 0; i < lines.length; i++) {\n" +
             "            var line = lines[i].trim();\n" +
@@ -353,15 +356,33 @@ public class MiniGameBackend extends TeaBackend {
             "            if (assetType === 'd') {\n" +
             "                __preloadedAssets[assetPath] = { type: 'dir', data: null };\n" +
             "            } else {\n" +
-            "                try {\n" +
-            "                    var readPath = renameMap[assetPath] || assetPath;\n" +
-            "                    var data = fs.readFileSync('assets' + readPath);\n" +
-            "                    __preloadedAssets[assetPath] = { type: 'file', data: data };\n" +
-            "                } catch(e2) {\n" +
-            "                    console.error('[adapter] preloadAssets: Failed to read', assetPath, e2);\n" +
-            "                }\n" +
+            "                files.push(assetPath);\n" +
             "            }\n" +
             "        }\n" +
+            "        var BATCH = 10;\n" +
+            "        for (var i = 0; i < files.length; i += BATCH) {\n" +
+            "            var batch = files.slice(i, Math.min(i + BATCH, files.length));\n" +
+            "            var promises = batch.map(function(assetPath) {\n" +
+            "                return new Promise(function(resolve) {\n" +
+            "                    var readPath = renameMap[assetPath] || assetPath;\n" +
+            "                    fs.readFile({\n" +
+            "                        filePath: 'assets' + readPath,\n" +
+            "                        success: function(res) {\n" +
+            "                            __preloadedAssets[assetPath] = { type: 'file', data: res.data };\n" +
+            "                            resolve();\n" +
+            "                        },\n" +
+            "                        fail: function(err) {\n" +
+            "                            console.error('[adapter] Failed:', assetPath, err.errMsg);\n" +
+            "                            resolve();\n" +
+            "                        }\n" +
+            "                    });\n" +
+            "                });\n" +
+            "            });\n" +
+            "            await Promise.all(promises);\n" +
+            "            if (onProgress) onProgress(Math.min(i + BATCH, files.length), files.length);\n" +
+            "            await new Promise(function(r) { globalThis.requestAnimationFrame(r); });\n" +
+            "        }\n" +
+            "        console.log('[adapter] preloadAssets complete, assets:', Object.keys(__preloadedAssets).length);\n" +
             "    } catch(e) {\n" +
             "        console.error('[adapter] preloadAssets error:', e);\n" +
             "    }\n" +
@@ -553,8 +574,15 @@ public class MiniGameBackend extends TeaBackend {
      */
     private void renameBlockedExtensions() {
         Set<String> allowedExts = new HashSet<>(Arrays.asList(
-            "txt", "png", "jpg", "jpeg", "json", "js", "atlas",
-            "ttf", "mp3", "wav", "xml", "fnt", "csv", "webp", "wasm"
+            // WeChat Mini Game official whitelist (69 extensions)
+            // Source: https://developers.weixin.qq.com/minigame/dev/guide/base-ability/code-package.html
+            "png", "jpg", "jpeg", "gif", "svg", "js", "json", "cer", "obj", "dae",
+            "fbx", "mtl", "stl", "3ds", "mp3", "pvr", "wav", "plist", "ttf", "fnt",
+            "gz", "ccz", "m4a", "mp4", "bmp", "atlas", "swf", "ani", "part", "proto",
+            "bin", "sk", "mipmaps", "txt", "zip", "tt", "map", "ogg", "silk", "dbbin",
+            "dbmv", "etc", "lmat", "lm", "ls", "lh", "lani", "lav", "lsani", "ltc",
+            "aac", "astc", "br", "csv", "cur", "dat", "dds", "glb", "gltf", "ico",
+            "ktx", "lmani", "lml", "pkm", "prefab", "scene", "skel", "wasm", "xml"
         ));
         FileHandle assetsDir = releasePath.child("assets");
         if (!assetsDir.exists()) return;
