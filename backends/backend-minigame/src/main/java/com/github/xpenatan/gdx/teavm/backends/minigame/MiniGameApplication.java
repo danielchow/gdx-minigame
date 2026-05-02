@@ -17,6 +17,7 @@ import com.badlogic.gdx.utils.ObjectMap;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.OnHideCallback;
+import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.gdx.teavm.backends.minigame.dom.typedarray.TypedArrays;
 import com.github.xpenatan.jmultiplatform.core.JMultiplatform;
 import com.github.xpenatan.jmultiplatform.core.JPlatformMap;
@@ -124,6 +125,8 @@ public class MiniGameApplication implements Application {
         Gdx.gl30 = graphics.getGL30();
         Gdx.input = input;
         Gdx.files = files;
+        AssetInstance.setInstance(new MiniGameAssetDownloader());
+        AssetInstance.setInstance(new MiniGameAssetLoader());
         Gdx.net = net;
         this.audio = new MiniGameAudio();
         Gdx.audio = audio;

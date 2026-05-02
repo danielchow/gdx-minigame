@@ -12,9 +12,12 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.Base64;
 import org.teavm.tooling.TeaVMTargetType;
 
 /**
@@ -126,7 +129,10 @@ public class MiniGameBackend extends TeaBackend {
             "    },\n" +
             "    \"compileType\": \"game\",\n" +
             "    \"appid\": \"" + appId + "\",\n" +
-            "    \"libVersion\": \"3.12.1\"\n" +
+            "    \"libVersion\": \"3.12.1\",\n" +
+            "    \"packOptions\": {\n" +
+            "        \"ignore\": []\n" +
+            "    }\n" +
             "}\n";
 
         FileHandle projectConfig = releasePath.child("project.config.json");
@@ -320,6 +326,14 @@ public class MiniGameBackend extends TeaBackend {
             "exports.preloadAssets = function() {\n" +
             "    try {\n" +
             "        var fs = wx.getFileSystemManager();\n" +
+            "        var renameMap = {};\n" +
+            "        try {\n" +
+            "            var mapData = fs.readFileSync('assets/rename-map.json', 'utf-8');\n" +
+            "            renameMap = JSON.parse(mapData);\n" +
+            "            console.log('[adapter] Loaded rename map, entries:', Object.keys(renameMap).length);\n" +
+            "        } catch(e) {\n" +
+            "            console.log('[adapter] No rename-map.json found, proceeding without renaming');\n" +
+            "        }\n" +
             "        var manifest = '';\n" +
             "        try {\n" +
             "            manifest = fs.readFileSync('assets/preload.txt', 'utf-8');\n" +
@@ -340,7 +354,8 @@ public class MiniGameBackend extends TeaBackend {
             "                __preloadedAssets[assetPath] = { type: 'dir', data: null };\n" +
             "            } else {\n" +
             "                try {\n" +
-            "                    var data = fs.readFileSync('assets' + assetPath);\n" +
+            "                    var readPath = renameMap[assetPath] || assetPath;\n" +
+            "                    var data = fs.readFileSync('assets' + readPath);\n" +
             "                    __preloadedAssets[assetPath] = { type: 'file', data: data };\n" +
             "                } catch(e2) {\n" +
             "                    console.error('[adapter] preloadAssets: Failed to read', assetPath, e2);\n" +
@@ -527,5 +542,62 @@ public class MiniGameBackend extends TeaBackend {
 
         // Extract WASM binary from embedded base64 in gdx.wasm.js
         extractWasmFromJs();
+
+        // Rename files with blocked extensions for WeChat readFileSync compatibility
+        renameBlockedExtensions();
+    }
+
+    /**
+     * Rename files with extensions that WeChat's readFileSync blocks (permission denied).
+     * Appends .txt to blocked extensions and generates a rename-map.json for runtime lookup.
+     */
+    private void renameBlockedExtensions() {
+        Set<String> allowedExts = new HashSet<>(Arrays.asList(
+            "txt", "png", "jpg", "jpeg", "json", "js", "atlas",
+            "ttf", "mp3", "wav", "xml", "fnt", "csv", "webp", "wasm"
+        ));
+        FileHandle assetsDir = releasePath.child("assets");
+        if (!assetsDir.exists()) return;
+
+        // Build rename map
+        StringBuilder json = new StringBuilder("{\n");
+        int[] count = {0};
+        renameFilesRecursive(assetsDir, assetsDir, allowedExts, json, count);
+
+        if (count[0] > 0) {
+            // Remove trailing comma
+            int lastComma = json.lastIndexOf(",");
+            if (lastComma > 0) json.deleteCharAt(lastComma);
+            json.append("}\n");
+            FileHandle mapFile = assetsDir.child("rename-map.json");
+            mapFile.writeString(json.toString(), false);
+            System.out.println("[MiniGameBackend] Generated rename-map.json with " + count[0] + " entries");
+        }
+    }
+
+    private void renameFilesRecursive(FileHandle dir, FileHandle root, Set<String> allowedExts, StringBuilder json, int[] count) {
+        FileHandle[] children = dir.list();
+        if (children == null) return;
+        for (FileHandle child : children) {
+            if (child.isDirectory()) {
+                renameFilesRecursive(child, root, allowedExts, json, count);
+            } else {
+                String name = child.name();
+                // Skip metadata files and dotfiles
+                if (name.equals("rename-map.json") || name.equals("preload.txt") || name.startsWith(".")) continue;
+                String ext = child.extension().toLowerCase();
+                if (!allowedExts.contains(ext)) {
+                    String relativePath = child.path().substring(root.path().length() + 1).replace('\\', '/');
+                    String newName = name + ".txt";
+                    FileHandle renamed = child.sibling(newName);
+                    // Delete target if exists (incremental builds)
+                    if (renamed.exists()) renamed.delete();
+                    child.moveTo(renamed);
+                    String renamedRelative = renamed.path().substring(root.path().length() + 1).replace('\\', '/');
+                    json.append("  \"/").append(relativePath).append("\": \"/").append(renamedRelative).append("\",\n");
+                    count[0]++;
+                }
+            }
+        }
     }
 }
