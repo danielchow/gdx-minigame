@@ -22,7 +22,7 @@ public class MiniGameFiles implements Files {
 
     public MiniGameFiles(MiniGameApplicationConfiguration config, MiniGameApplication application) {
         this.internalStorage = new InternalStorage();
-        this.classpathStorage = new ClasspathStorage();
+        this.classpathStorage = this.internalStorage;  // Share same storage — all assets preloaded into internal
         this.localStorage = new MemoryFileStorage();
         localStoragePrefix = config.localStoragePrefix;
     }
