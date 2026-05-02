@@ -46,19 +46,19 @@ public interface WXAudioContext extends JSObject {
     void seek(double position);
 
     @JSMethod
-    void onEnded(Runnable callback);
+    void onEnded(AudioCallback callback);
 
     @JSMethod
-    void onError(Runnable callback);
+    void onError(AudioCallback callback);
 
     @JSMethod
-    void onStop(Runnable callback);
+    void onStop(AudioCallback callback);
 
     @JSMethod
-    void onPlay(Runnable callback);
+    void onPlay(AudioCallback callback);
 
     @JSMethod
-    void onPause(Runnable callback);
+    void onPause(AudioCallback callback);
 
     @JSMethod
     void destroy();
