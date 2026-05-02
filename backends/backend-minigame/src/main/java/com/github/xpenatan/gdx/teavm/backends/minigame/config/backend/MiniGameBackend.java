@@ -83,6 +83,7 @@ public class MiniGameBackend extends TeaBackend {
         super.build(data);
         // Post-build steps
         fixFreetypeModuleScoping();
+        moveJsFilesToRoot();
     }
 
     private void setupMinigame(TeaCompilerData data) {
@@ -503,6 +504,22 @@ public class MiniGameBackend extends TeaBackend {
             } catch (Exception e) {
                 // Non-critical, continue
             }
+        }
+    }
+
+    /**
+     * Move JS files from scripts/ subpackage to root so they can be require()'d.
+     * WeChat's module system doesn't register subpackage JS files as CommonJS modules,
+     * so require('./freetype.js') fails if the file is in scripts/.
+     */
+    private void moveJsFilesToRoot() {
+        FileHandle scriptsFolder = releasePath.child("scripts");
+        // Move freetype.js to root (gdx.wasm.js is already moved in copyAssets)
+        FileHandle freetypeJs = scriptsFolder.child("freetype.js");
+        if (freetypeJs.exists()) {
+            FileHandle freetypeInRoot = releasePath.child("freetype.js");
+            freetypeJs.moveTo(freetypeInRoot);
+            System.out.println("[MiniGameBackend] Moved freetype.js to root (JS files must be in main package)");
         }
     }
 
