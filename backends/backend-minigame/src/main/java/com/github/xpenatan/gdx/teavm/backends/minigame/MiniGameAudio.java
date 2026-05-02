@@ -99,9 +99,14 @@ public class MiniGameAudio implements Audio {
         stealCallbacks.remove(ctx);
     }
 
+    private static String toAssetPath(String path) {
+        if (path.startsWith("assets/")) return path;
+        return "assets/" + path;
+    }
+
     @Override
     public MiniGameSound newSound(FileHandle fileHandle) {
-        return new MiniGameSound(this, fileHandle.path());
+        return new MiniGameSound(this, toAssetPath(fileHandle.path()));
     }
 
     @Override
@@ -310,7 +315,7 @@ public class MiniGameAudio implements Audio {
 
         public MiniGameMusic(FileHandle fileHandle) {
             audioContext = WX.createInnerAudioContext();
-            audioContext.setSrc(fileHandle.path());
+            audioContext.setSrc(toAssetPath(fileHandle.path()));
             audioContext.setVolume(volume);
 
             audioContext.onEnded(() -> {
