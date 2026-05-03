@@ -1,0 +1,32 @@
+> Source: https://developers.weixin.qq.com/miniprogram/dev/api/canvas/Path2D.rect.html
+
+## Path2D.rect(number x, number y, number width, number height)
+
+基础库 2.11.0 开始支持，低版本需做[兼容处理](../../framework/compatibility.html)。
+
+**小程序插件**：不支持
+
+相关文档: [画布指南](../../framework/ability/canvas.html)、[canvas 组件介绍](../../component/canvas.html)
+
+## # 功能描述
+
+添加方形路径。
+
+## # 参数
+
+### # number x
+
+开始点横坐标。
+
+### # number y
+
+开始点纵坐标。
+
+### # number width
+
+方形宽度，正数向右，负数向左。
+
+### # number height
+
+方形高度，正数向下，负数向上。
+ The translations are provided by WeChat Translation and are for reference only. In case of any inconsistency and discrepancy between the Chinese version and the English version, the Chinese version shall prevail.Incorrect translation. [Tap to report.](javascript:;)
