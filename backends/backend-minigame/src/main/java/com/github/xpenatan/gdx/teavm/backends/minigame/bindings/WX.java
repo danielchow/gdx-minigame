@@ -3,6 +3,7 @@ package com.github.xpenatan.gdx.teavm.backends.minigame.bindings;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.browser.AnimationFrameCallback;
+import org.teavm.jso.typedarrays.ArrayBuffer;
 
 /**
  * Static bindings for the WeChat Mini Game wx.* API.
@@ -145,4 +146,36 @@ public final class WX {
 
     @JSBody(params = "callback", script = "wx.onWindowResize(callback);")
     public static native void onWindowResize(LifecycleCallback callback);
+
+    // === File System Sync Operations ===
+
+    @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readFileSync(path); } catch(e) { return null; }")
+    public static native ArrayBuffer fsReadFileSync(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path", "data"}, script = "fsm.writeFileSync(path, data);")
+    public static native void fsWriteFileSync(JSObject fsm, String path, JSObject data);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { fsm.unlinkSync(path); return true; } catch(e) { return false; }")
+    public static native boolean fsUnlinkSync(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { fsm.mkdirSync(path, true); } catch(e) { }")
+    public static native void fsMkdirSync(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { fsm.rmdirSync(path, true); return true; } catch(e) { return false; }")
+    public static native boolean fsRmdirSync(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readdirSync(path); } catch(e) { return []; }")
+    public static native String[] fsReaddirSync(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { var s = fsm.statSync(path); return s.isDirectory(); } catch(e) { return false; }")
+    public static native boolean fsIsDirectory(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { fsm.accessSync(path); return true; } catch(e) { return false; }")
+    public static native boolean fsExists(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "path"}, script = "try { var s = fsm.statSync(path); return s.size; } catch(e) { return 0; }")
+    public static native double fsFileSize(JSObject fsm, String path);
+
+    @JSBody(params = {"fsm", "oldPath", "newPath"}, script = "try { fsm.renameSync(oldPath, newPath); return true; } catch(e) { return false; }")
+    public static native boolean fsRenameSync(JSObject fsm, String oldPath, String newPath);
 }
