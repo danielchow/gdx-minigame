@@ -7,6 +7,31 @@
 - **Group ID:** `com.zourgames.gdx`
 - **Status:** The `backend-minigame` module is mature and working, with ongoing improvements merged regularly.
 
+## Architecture
+
+```
+LibGDX Game (Java/Kotlin)
+       │
+       ▼
+  TeaVM Compiler ─── backend-shared/ (compiler infra, asset handling)
+       │                        ▲
+       │                   reference only
+       ▼
+  backend-minigame/ ──────────┘
+       │
+       ├── config/backend/MiniGameBackend.java  ──►  Generates WeChat output files
+       │       (game.js, game.json, adapter/index.js, project.config.json)
+       │
+       ├── bindings/WX.java, WXCanvas.java, WXAudioContext.java  ──►  WeChat API wrappers
+       │
+       └── MiniGame*.java (Audio, Input, Graphics, Files, Net, ...)  ──►  LibGDX interfaces
+       │
+       ▼
+  WeChat Mini Game Runtime (canvas, wx.* APIs)
+```
+
+**Key insight:** `backend-minigame` implements LibGDX backend interfaces (Audio, Input, Graphics, Files, Net, Preferences, etc.) by calling into `bindings/WX*.java` which wraps WeChat's `wx.*` JavaScript APIs via TeaVM's JS interop. The `config/backend/MiniGameBackend.java` handles build-time code generation, producing the WeChat-specific output structure instead of a standard HTML page.
+
 ## Project Structure
 
 ### Top-Level Files
@@ -22,8 +47,11 @@
 
 | Path | Purpose |
 |------|---------|
-| `backends/backend-minigame/` | WeChat Mini Game backend module |
-| `backends/backend-web/` | Original web backend (fork source for minigame) |
+| `backends/backend-minigame/` | WeChat Mini Game backend module — **this is where all development happens** |
+| `backends/backend-web/` | Original web backend — **read-only reference, do not modify** |
+| `backends/backend-shared/` | Shared compiler infrastructure — **read-only reference, do not modify** |
+
+> ⚠️ **Rule:** Never modify `backend-web/` or `backend-shared/`. They are upstream code used as reference implementations. When adding features to `backend-minigame/`, study the equivalent class in `backend-web/` first to understand the pattern, then adapt it for the WeChat API.
 
 ### backend-minigame Key Packages
 
@@ -41,10 +69,20 @@
 ### Reference Documentation
 
 | Path | Contents |
-|------|----------|
+|------|---------|
 | `references/api-index.md` | Index of all 904 WeChat API docs across 22 categories |
 | `references/wechat-minigame/` | 19 WeChat technical guides (QuickStart, TechPrinciple, adapters, FAQ) |
-| `references/wx-api-docs/` | Full WeChat API docs organized by category (ad, ai, base, device, file, media, network, render, storage, ui, etc.) |
+| `references/wx-api-docs/` | Full WeChat API docs organized by category |
+
+**Most relevant WX API categories for this project:**
+- `render/` — canvas, frame, image, font (used by `MiniGameGraphics`, `WXCanvas`)
+- `media/audio/` — audio playback (used by `MiniGameAudio`, `WXAudioContext`)
+- `storage/` — key-value storage (used by `MiniGamePreferences`, `FileDB`)
+- `base/` — lifecycle, system info, touch events (used by `WX.java`, callbacks)
+- `network/` — HTTP requests, WebSocket (used by `MiniGameNet`)
+- `file/` — file system access (used by `MiniGameFiles`, `MiniGameFileHandle`)
+
+> 💡 When implementing a new feature, always check **both** the web backend (`backend-web/`) for the LibGDX interface pattern **and** `references/wx-api-docs/` for the WeChat API that provides the equivalent capability.
 
 ### Build Config
 
@@ -52,6 +90,54 @@
 |------|---------|
 | `buildSrc/src/main/kotlin/LibExt.kt` | Group ID, versions, build constants |
 | `settings.gradle.kts` | Module registration |
+
+---
+
+## Common Agent Tasks
+
+### Adding a new WeChat API binding
+
+1. **Find the equivalent** in `backends/backend-web/` — study how the web backend implements the LibGDX interface
+2. **Read the WeChat API doc** in `references/wx-api-docs/<category>/` to understand what `wx.*` calls are available
+3. **Add the binding** in `bindings/` — create a Java wrapper using TeaVM's `@JSBody` / JS interop to call the `wx.*` API
+4. **Wire it up** in the corresponding `MiniGame*.java` class (e.g., `MiniGameAudio.java` for audio APIs)
+5. **Build and test** using the Build-Publish-Test cycle below
+
+### Fixing a runtime error from WeChat DevTools
+
+Use the `fix-wechat` prompt template (`.pi/prompts/fix-wechat.md`), or manually:
+
+1. Copy the console error from WeChat DevTools
+2. Identify whether it's a **compile-time** issue (TeaVM class/method problem) or **runtime** issue (WX API mismatch, missing adapter shim)
+3. For runtime issues: check `bindings/WX*.java` (JS interop layer) and `config/backend/MiniGameBackend.java` (generated adapter code)
+4. For compile-time issues: check `config/plugins/` (class filter, transformer)
+5. Fix, rebuild, and re-test
+
+### Updating the adapter / generated output
+
+The adapter (`adapter/index.js`) and WeChat config files are **generated at build time** by `MiniGameBackend.java`. Do not edit generated files directly — edit the generation logic in:
+
+- `MiniGameBackend.java` → `generateAdapter()`, `generateGameJs()`, `generateGameJson()`, `generateProjectConfigJson()`
+
+### Understanding how a LibGDX interface maps to WeChat
+
+| LibGDX Interface | MiniGame Class | WX API Category |
+|-----------------|---------------|-----------------|
+| `Audio` / `Music` | `MiniGameAudio` | `media/audio/` |
+| `Graphics` | `MiniGameGraphics` | `render/canvas/` |
+| `Input` | `MiniGameInput` | `base/` (touch events) |
+| `Files` / `FileHandle` | `MiniGameFiles` / `MiniGameFileHandle` | `file/` |
+| `Net` | `MiniGameNet` | `network/` |
+| `Preferences` | `MiniGamePreferences` | `storage/` |
+| `Application` | `MiniGameApplication` | `base/` (lifecycle) |
+
+---
+
+## Testing
+
+- **No automated test suite** for `backend-minigame` itself — the only test harness is the WeChat DevTools running the Solitaire test game
+- `backend-web` has one unit test (`MemoryFileStorageTest.java`) that may serve as a pattern
+- Always validate changes via the full Build-Publish-Test cycle below
 
 ---
 
@@ -90,21 +176,6 @@ rm -rf minigame/build/dist
 #   ~/Develop/Private/legacy/Solitaire/minigame/build/dist/minigame
 # Check the console for errors.
 ```
-
----
-
-## Debugging WeChat DevTools Errors
-
-Use the `fix-wechat` prompt template (`.pi/prompts/fix-wechat.md`):
-
-1. Copy console output from WeChat DevTools
-2. Feed it into the fix-wechat prompt
-3. It runs a **scout → plan → review → work** pipeline that:
-   - Identifies each distinct issue
-   - Scouts root causes in backend source and generated output
-   - Plans concrete fixes
-   - Reviews and implements fixes with worker→reviewer loops
-   - Builds and publishes the backend, rebuilds Solitaire
 
 ---
 
