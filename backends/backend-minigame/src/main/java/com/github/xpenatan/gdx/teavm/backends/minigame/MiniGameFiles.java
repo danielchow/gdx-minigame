@@ -5,25 +5,26 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.FileDB;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.MemoryFileStorage;
+import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.PersistentFileStorage;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.ClasspathStorage;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.InternalStorage;
 
 /**
  * Files implementation for WeChat Mini Game.
  * Forked from WebFiles — uses MemoryFileStorage for internal/classpath,
- * and MemoryFileStorage for local (no IndexedDB on WeChat).
+ * and PersistentFileStorage (WX FileSystemManager) for local.
  */
 public class MiniGameFiles implements Files {
 
     public MemoryFileStorage internalStorage;
     public MemoryFileStorage classpathStorage;
-    public MemoryFileStorage localStorage;
+    public FileDB localStorage;
     public String localStoragePrefix;
 
     public MiniGameFiles(MiniGameApplicationConfiguration config, MiniGameApplication application) {
         this.internalStorage = new InternalStorage();
         this.classpathStorage = this.internalStorage;  // Share same storage — all assets preloaded into internal
-        this.localStorage = new MemoryFileStorage();
+        this.localStorage = new PersistentFileStorage(config.localStoragePrefix);
         localStoragePrefix = config.localStoragePrefix;
     }
 
