@@ -178,4 +178,23 @@ public final class WX {
 
     @JSBody(params = {"fsm", "oldPath", "newPath"}, script = "try { fsm.renameSync(oldPath, newPath); return true; } catch(e) { return false; }")
     public static native boolean fsRenameSync(JSObject fsm, String oldPath, String newPath);
+
+    // === Ads ===
+
+    @JSBody(params = "adUnitId", script = "return wx.createRewardedVideoAd({adUnitId: adUnitId});")
+    public static native WXRewardedVideoAd createRewardedVideoAd(String adUnitId);
+
+    @JSBody(params = "adUnitId", script = "return wx.createInterstitialAd({adUnitId: adUnitId});")
+    public static native WXInterstitialAd createInterstitialAd(String adUnitId);
+
+    @JSBody(params = "options", script = "return wx.createCustomAd(options);")
+    public static native WXCustomAd createCustomAd(JSObject options);
+
+    /**
+     * Build options for wx.createCustomAd.
+     * @param adIntervals Auto-refresh interval in seconds (≥30). 0 = pass 30 (minimum).
+     */
+    @JSBody(params = {"adUnitId", "left", "top", "width", "adIntervals"},
+        script = "return {adUnitId: adUnitId, adIntervals: adIntervals > 0 ? adIntervals : 30, style: {left: left, top: top, width: width}};")
+    public static native JSObject createCustomAdOptions(String adUnitId, double left, double top, double width, double adIntervals);
 }
