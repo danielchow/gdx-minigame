@@ -174,8 +174,18 @@ public class MiniGameBackend extends TeaBackend {
             "        console.log('[game.js] wx.loadSubpackage not available, skipping ' + name);\n" +
             "        return Promise.resolve();\n" +
             "    }\n" +
-            "    return wx.loadSubpackage({ name: name }).promise.catch(function(e) {\n" +
-            "        console.log('[game.js] Subpackage \"' + name + '\" load issue:', e.message || e);\n" +
+            "    return new Promise(function(resolve) {\n" +
+            "        wx.loadSubpackage({\n" +
+            "            name: name,\n" +
+            "            success: function() {\n" +
+            "                console.log('[game.js] Subpackage \"' + name + '\" loaded');\n" +
+            "                resolve();\n" +
+            "            },\n" +
+            "            fail: function(err) {\n" +
+            "                console.log('[game.js] Subpackage \"' + name + '\" load issue:', err.errMsg || err);\n" +
+            "                resolve();\n" +
+            "            }\n" +
+            "        });\n" +
             "    });\n" +
             "}\n\n" +
             "async function startGame() {\n" +
