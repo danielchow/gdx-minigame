@@ -303,10 +303,47 @@ public class MiniGameBackend extends TeaBackend {
         // Extract WASM binary from embedded base64 in gdx.wasm.js
         extractWasmFromJs();
 
+        // Replace the large base64 data URI with a 1-byte dummy to save ~129K
+        replaceWasmDataUriWithDummy();
+
         // Note: app.js move happens in build() post-build step (TeaVM output doesn't exist yet here)
 
         // Rename files with blocked extensions for WeChat readFileSync compatibility
         renameBlockedExtensions();
+    }
+
+    /**
+     * Replace the large base64 WASM data URI in gdx.wasm.js with a 1-byte dummy (AA==).
+     * The standalone gdx.wasm has already been extracted by extractWasmFromJs(),
+     * so the embedded copy is dead weight. The adapter's patched WebAssembly.instantiate
+     * loads from the standalone file, ignoring the dummy bytes.
+     *
+     * Saves ~129KB in the build output.
+     */
+    private void replaceWasmDataUriWithDummy() {
+        FileHandle wasmJs = releasePath.child("subpackages/engine/gdx.wasm.js");
+        if (!wasmJs.exists()) {
+            return;
+        }
+        try {
+            String content = wasmJs.readString();
+            // Match the full data URI including the base64 payload, keeping prefix and suffix via capture groups
+            Pattern pattern = Pattern.compile("(\"data:application/octet-stream;base64,)[A-Za-z0-9+/=]+(\")");
+            Matcher matcher = pattern.matcher(content);
+            if (!matcher.find()) {
+                System.out.println("[MiniGameBackend] WARNING: Could not find base64 WASM data URI in gdx.wasm.js");
+                return;
+            }
+            int originalSize = content.length();
+            String replacement = matcher.group(1) + "AA==" + matcher.group(2);
+            String modified = matcher.replaceFirst(replacement);
+            wasmJs.writeString(modified, false);
+            int saved = originalSize - modified.length();
+            System.out.println("[MiniGameBackend] Replaced WASM data URI with 1-byte dummy (saved ~" + (saved / 1024) + "KB)");
+        } catch (Exception e) {
+            System.out.println("[MiniGameBackend] ERROR: Failed to replace WASM data URI: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**
