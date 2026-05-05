@@ -93,6 +93,20 @@ public class MiniGameBackend extends TeaBackend {
         if (appJs.exists()) {
             appJs.moveTo(gameFolder.child(targetFileName + ".js"));
             System.out.println("[MiniGameBackend] Moved " + targetFileName + ".js to subpackages/game/");
+
+            // Insert Module declaration after "use strict" so TeaVM's strict-mode code can access
+            // the freetype Module object set by freetype.js via globalThis.Module
+            FileHandle movedAppJs = gameFolder.child(targetFileName + ".js");
+            String appContent = movedAppJs.readString();
+            String moduleDecl = "var Module=typeof globalThis!==\"undefined\"&&globalThis.Module?globalThis.Module:{};\n";
+            // Insert after the "use strict"; directive (first line)
+            if (appContent.startsWith("\"use strict\";")) {
+                appContent = "\"use strict\";\n" + moduleDecl + appContent.substring("\"use strict\";\n".length());
+            } else {
+                appContent = moduleDecl + appContent;
+            }
+            movedAppJs.writeString(appContent, false);
+            System.out.println("[MiniGameBackend] Inserted Module declaration into " + targetFileName + ".js");
         }
     }
 
