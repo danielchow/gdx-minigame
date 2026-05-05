@@ -1,0 +1,13 @@
+{
+    "description": "${description}",
+    "setting": {
+        "urlCheck": false,
+        "es6": true
+    },
+    "compileType": "game",
+    "appid": "${appId}",
+    "libVersion": "3.12.1",
+    "packOptions": {
+        "ignore": []
+    }
+}

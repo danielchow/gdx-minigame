@@ -1,0 +1,14 @@
+{
+    "deviceOrientation": "${orientation}",
+    "networkTimeout": {
+        "request": 5000,
+        "connectSocket": 5000,
+        "uploadFile": 5000,
+        "downloadFile": 500000
+    },
+    "subpackages": [
+        { "name": "engine", "root": "subpackages/engine/" },
+        { "name": "game", "root": "subpackages/game/" },
+        { "name": "assets", "root": "assets/" }
+    ]
+}

@@ -99,7 +99,7 @@ public class MiniGameApplication implements Application {
 
         JMultiplatform instance = JMultiplatform.getInstance();
         JPlatformMap map = instance.getMap();
-        map.put(WEB_SCRIPT_PATH, "scripts/");
+        map.put(WEB_SCRIPT_PATH, "subpackages/engine/");
         map.put(WEB_ASSET_PATH, "assets/");
 
         // Set canvas from globalThis.canvas if not already configured
@@ -208,7 +208,7 @@ public class MiniGameApplication implements Application {
             }
             runnablesHelper.clear();
             graphics.frameId++;
-            if (graphics.frameId > 60) {
+            if (graphics.frameId > 5) {
                 graphics.render(appListener);
             }
             input.reset();

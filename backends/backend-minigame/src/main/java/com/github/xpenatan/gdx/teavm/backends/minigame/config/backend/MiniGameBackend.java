@@ -7,14 +7,10 @@ import com.github.xpenatan.gdx.teavm.backends.shared.config.AssetsCopy;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.compiler.TeaBackend;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.compiler.TeaCompilerData;
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,8 +18,8 @@ import org.teavm.tooling.TeaVMTargetType;
 
 /**
  * Build backend for WeChat Mini Game.
- * Generates game.js, game.json, project.config.json, and adapter/index.js
- * instead of index.html + web.xml.
+ * Generates game.js, game.json, project.config.json, adapter.js, and first-screen.js
+ * with a subpackages/ directory layout for parallel loading.
  */
 public class MiniGameBackend extends TeaBackend {
 
@@ -81,9 +77,33 @@ public class MiniGameBackend extends TeaBackend {
     @Override
     protected void build(TeaCompilerData data) {
         super.build(data);
-        // Post-build steps
+        // Post-build steps (TeaVM output now exists)
         fixFreetypeModuleScoping();
-        moveJsFilesToRoot();
+        // moveJsFilesToRoot() removed — JS files stay in subpackages/engine/
+
+        // Move TeaVM output (app.js) to game subpackage — can't do this in copyAssets()
+        // because TeaVM hasn't produced the file yet at that point
+        FileHandle gameFolder = releasePath.child("subpackages/game");
+        gameFolder.mkdirs();
+        FileHandle appJs = releasePath.child(targetFileName + ".js");
+        if (appJs.exists()) {
+            appJs.moveTo(gameFolder.child(targetFileName + ".js"));
+            System.out.println("[MiniGameBackend] Moved " + targetFileName + ".js to subpackages/game/");
+
+            // Insert Module declaration after "use strict" so TeaVM's strict-mode code can access
+            // the freetype Module object set by freetype.js via globalThis.Module
+            FileHandle movedAppJs = gameFolder.child(targetFileName + ".js");
+            String appContent = movedAppJs.readString();
+            String moduleDecl = "var Module=typeof globalThis!==\"undefined\"&&globalThis.Module?globalThis.Module:{};\n";
+            // Insert after the "use strict"; directive (first line)
+            if (appContent.startsWith("\"use strict\";")) {
+                appContent = "\"use strict\";\n" + moduleDecl + appContent.substring("\"use strict\";\n".length());
+            } else {
+                appContent = moduleDecl + appContent;
+            }
+            movedAppJs.writeString(appContent, false);
+            System.out.println("[MiniGameBackend] Inserted Module declaration into " + targetFileName + ".js");
+        }
     }
 
     private void setupMinigame(TeaCompilerData data) {
@@ -94,26 +114,15 @@ public class MiniGameBackend extends TeaBackend {
         generateProjectConfigJson();
         generateGameJs(data);
         generateAdapter();
+        generateFirstScreen();
     }
 
     /**
      * Generate game.json — WeChat Mini Game configuration.
      */
     private void generateGameJson() {
-        String json = "{\n" +
-            "    \"deviceOrientation\": \"" + orientation + "\",\n" +
-            "    \"networkTimeout\": {\n" +
-            "        \"request\": 5000,\n" +
-            "        \"connectSocket\": 5000,\n" +
-            "        \"uploadFile\": 5000,\n" +
-            "        \"downloadFile\": 500000\n" +
-            "    },\n" +
-            "    \"subpackages\": [\n" +
-            "        { \"name\": \"engine\", \"root\": \"scripts/\" },\n" +
-            "        { \"name\": \"assets\", \"root\": \"assets/\" }\n" +
-            "    ]\n" +
-            "}\n";
-
+        String json = TemplateUtil.resolve("game.json",
+            Map.of("orientation", orientation));
         FileHandle gameJson = releasePath.child("game.json");
         gameJson.writeString(json, false);
     }
@@ -122,368 +131,62 @@ public class MiniGameBackend extends TeaBackend {
      * Generate project.config.json — WeChat DevTools project config.
      */
     private void generateProjectConfigJson() {
-        String json = "{\n" +
-            "    \"description\": \"" + description + "\",\n" +
-            "    \"setting\": {\n" +
-            "        \"urlCheck\": false,\n" +
-            "        \"es6\": true\n" +
-            "    },\n" +
-            "    \"compileType\": \"game\",\n" +
-            "    \"appid\": \"" + appId + "\",\n" +
-            "    \"libVersion\": \"3.12.1\",\n" +
-            "    \"packOptions\": {\n" +
-            "        \"ignore\": []\n" +
-            "    }\n" +
-            "}\n";
-
+        String json = TemplateUtil.resolve("project.config.json",
+            Map.of(
+                "description", description,
+                "appId", appId
+            ));
         FileHandle projectConfig = releasePath.child("project.config.json");
         projectConfig.writeString(json, false);
     }
 
     /**
      * Generate game.js — Main package entry point.
+     * Uses parallel subpackage loading with WebGL splash screen.
      */
     private void generateGameJs(TeaCompilerData data) {
-        String js = "// game.js — WeChat Mini Game entry point\n" +
-            "// Generated by MiniGameBackend\n\n" +
-            "console.log('[game.js] Step 1: Requiring adapter...');\n" +
-            "var adapter;\n" +
-            "try {\n" +
-            "    adapter = require('./adapter/index.js');\n" +
-            "} catch(e) {\n" +
-            "    console.error('[game.js] FATAL: adapter require failed:', e);\n" +
-            "    throw e;\n" +
-            "}\n" +
-            "const { setup } = adapter;\n" +
-            "console.log('[game.js] Step 2: Adapter loaded');\n\n" +
-            "// Phase 1: Setup shims and canvas (synchronous)\n" +
-            "const canvas = wx.createCanvas();\n" +
-            "console.log('[game.js] Step 3: Canvas created', canvas.width, 'x', canvas.height);\n" +
-            "setup(canvas);\n\n" +
-            "// Phase 2: Canvas is reserved for WebGL — do NOT call getContext('2d')\n" +
-            "// (WeChat locks each canvas to one context type)\n" +
-            "console.log('[game.js] Step 4: Canvas ready (preserving WebGL context)');\n\n" +
-            "// Phase 3: Load subpackages and start game\n" +
-            "async function startGame() {\n" +
-            "    console.log('[game.js] Step 5: startGame() entered');\n" +
-            "    try {\n" +
-            "        // Load engine subpackage (freetype.js, gdx.wasm.js)\n" +
-            "        if (typeof wx.loadSubpackage === 'function') {\n" +
-            "            console.log('[game.js] Step 6: Loading engine subpackage...');\n" +
-            "            await wx.loadSubpackage({ name: 'engine' }).promise;\n" +
-            "            console.log('[game.js] Step 7: Engine subpackage loaded');\n" +
-            "        } else {\n" +
-            "            console.log('[game.js] Step 6: wx.loadSubpackage not available, skipping');\n" +
-            "        }\n\n" +
-            "        // Load assets subpackage\n" +
-            "        if (typeof wx.loadSubpackage === 'function') {\n" +
-            "            console.log('[game.js] Step 7a: Loading assets subpackage...');\n" +
-            "            try {\n" +
-            "                await wx.loadSubpackage({ name: 'assets' }).promise;\n" +
-            "                console.log('[game.js] Step 7b: Assets subpackage loaded');\n" +
-            "            } catch(e) {\n" +
-            "                console.log('[game.js] Step 7b: Assets subpackage load failed or not needed:', e.message);\n" +
-            "            }\n" +
-            "        }\n" +
-            "        // Preload assets from filesystem into memory\n" +
-            "        console.log('[game.js] Step 7c: Preloading assets...');\n" +
-            "        await adapter.preloadAssets(function(loaded, total) {\n" +
-            "            console.log('[game.js] Preload progress: ' + loaded + '/' + total);\n" +
-            "        });\n" +
-            "        console.log('[game.js] Step 7d: Assets preloaded, count:', globalThis.__preloadedAssets ? Object.keys(globalThis.__preloadedAssets).length : 0);\n\n" +
-            "        // Load freetype.js (sets globalThis.Module synchronously)\n" +
-            "        try { console.log('[game.js] Step 8: Requiring freetype.js...'); require('./freetype.js'); console.log('[game.js] Step 9: freetype.js loaded'); } catch(e) { console.log('[game.js] Step 9: freetype.js skipped:', e.message); }\n\n" +
-            "        // Load gdx.wasm.js (sets window.Gdx ASYNC via self-execution)\n" +
-            "        try {\n" +
-            "            console.log('[game.js] Step 10: Requiring gdx.wasm.js...');\n" +
-            "            require('./gdx.wasm.js');\n" +
-            "            console.log('[game.js] Step 11: gdx.wasm.js required, polling for window.Gdx...');\n" +
-            "            // Wait for Gdx to be available (with timeout)\n" +
-            "            var gdxWaitStart = Date.now();\n" +
-            "            var pollCount = 0;\n" +
-            "            while (typeof window.Gdx === 'undefined') {\n" +
-            "                if (Date.now() - gdxWaitStart > 30000) {\n" +
-            "                    throw new Error('Timed out waiting for Gdx to initialize (30s)');\n" +
-            "                }\n" +
-            "                if (pollCount % 20 === 0) {\n" +
-            "                    console.log('[game.js] Step 12: Still polling window.Gdx... (', pollCount, 'polls,', Date.now() - gdxWaitStart, 'ms)');\n" +
-            "                }\n" +
-            "                pollCount++;\n" +
-            "                await new Promise(r => setTimeout(r, 50));\n" +
-            "            }\n" +
-            "            console.log('[game.js] Step 13: window.Gdx available! type:', typeof window.Gdx);\n" +
-            "        } catch(e) { console.error('[game.js] WASM init failed:', e); throw e; }\n\n" +
-            "        // Start the compiled game\n" +
-            "        console.log('[game.js] Step 14: Requiring " + data.outputName + ".js...');\n" +
-            "        const mainModule = require('./" + data.outputName + ".js');\n" +
-            "        console.log('[game.js] Step 15: App module loaded, main:', typeof mainModule.main);\n" +
-            "        if (mainModule && mainModule.main) {\n" +
-            "            console.log('[game.js] Step 16: Calling main()...');\n" +
-            "            mainModule.main([" + mainClassArgs + "]);\n" +
-            "            console.log('[game.js] Step 17: main() returned!');\n" +
-            "        }\n" +
-            "    } catch (err) {\n" +
-            "        console.error('[game.js] FAILED:', err);\n" +
-            "    }\n" +
-            "}\n\n" +
-            "startGame();\n";
-
+        String js = TemplateUtil.resolve("game.js",
+            Map.of("mainClassArgs", mainClassArgs));
         FileHandle gameJs = releasePath.child("game.js");
         gameJs.writeString(js, false);
     }
 
     /**
-     * Generate adapter/index.js — Browser polyfills for WeChat environment.
+     * Generate adapter.js — Browser polyfills for WeChat environment.
+     * Flat file at root level (was adapter/index.js).
+     * Includes real-device polyfills for window, document, performance.
      */
     private void generateAdapter() {
-        FileHandle adapterDir = releasePath.child("adapter");
-        adapterDir.mkdirs();
-
-        String js = "// adapter/index.js — Minimal browser polyfills for WeChat Mini Game\n" +
-            "// Generated by MiniGameBackend\n\n" +
-            "console.log('[adapter] 0: file parsed, starting eval');\n" +
-            "// === console polyfill (must be first — other polyfills use console.log) ===\n" +
-            "if (typeof globalThis.console === 'undefined') {\n" +
-            "    globalThis.console = { log: function(){}, error: function(){}, warn: function(){} };\n" +
-            "}\n\n" +
-            "console.log('[adapter] A: starting window polyfill');\n" +
-            "// === window polyfill ===\n" +
-            "// WeChat provides globalThis.window as a read-only getter, so we patch\n" +
-            "// properties onto the existing Window object instead of replacing it.\n" +
-            "(function() {\n" +
-            "    var win = (typeof window !== 'undefined') ? window : globalThis.window;\n" +
-            "    if (!win) { console.log('[adapter] A: no window, skipping polyfill'); return; }\n" +
-            "    console.log('[adapter] A: win exists, typeof win:', typeof win);\n" +
-            "    if (typeof win.requestAnimationFrame === 'undefined') {\n" +
-            "        win.requestAnimationFrame = function(cb) { return setTimeout(cb, 16); };\n" +
-            "    }\n" +
-            "    if (typeof win.cancelAnimationFrame === 'undefined') {\n" +
-            "        win.cancelAnimationFrame = function(id) { clearTimeout(id); };\n" +
-            "    }\n" +
-            "    if (typeof win.devicePixelRatio === 'undefined') {\n" +
-            "        win.devicePixelRatio = wx.getSystemInfoSync().pixelRatio;\n" +
-            "    }\n" +
-            "    if (typeof win.innerWidth === 'undefined') {\n" +
-            "        win.innerWidth = wx.getSystemInfoSync().screenWidth;\n" +
-            "    }\n" +
-            "    if (typeof win.innerHeight === 'undefined') {\n" +
-            "        win.innerHeight = wx.getSystemInfoSync().screenHeight;\n" +
-            "    }\n" +
-            "    if (typeof win.addEventListener === 'undefined') {\n" +
-            "        win.addEventListener = function() {};\n" +
-            "    }\n" +
-            "    if (typeof win.removeEventListener === 'undefined') {\n" +
-            "        win.removeEventListener = function() {};\n" +
-            "    }\n" +
-            "    if (typeof win.location === 'undefined') {\n" +
-            "        win.location = { href: './' };\n" +
-            "    }\n" +
-            "    if (!('Gdx' in win)) {\n" +
-            "        win.Gdx = undefined;\n" +
-            "    }\n" +
-            "})();\n" +
-            "console.log('[adapter] A: window polyfill done');\n\n" +
-            "// === WebAssembly patch ===\n" +
-            "if (typeof WXWebAssembly !== 'undefined') {\n" +
-            "    if (typeof WebAssembly === 'undefined') {\n" +
-            "        globalThis.WebAssembly = {};\n" +
-            "    }\n" +
-            "    var originalInstantiate = WebAssembly.instantiate;\n" +
-            "    console.log('[adapter] WXWebAssembly detected, patching WebAssembly.instantiate');\n" +
-            "    WebAssembly.instantiate = function(source, imports) {\n" +
-            "        console.log('[adapter] WebAssembly.instantiate called, source type:', typeof source, 'isArrayBuffer:', source instanceof ArrayBuffer, 'isUint8Array:', source instanceof Uint8Array);\n" +
-            "        if (source instanceof ArrayBuffer || source instanceof Uint8Array) {\n" +
-            "            console.log('[adapter] Redirecting to WXWebAssembly.instantiate(\"scripts/gdx.wasm\")');\n" +
-            "            return WXWebAssembly.instantiate('scripts/gdx.wasm', imports);\n" +
-            "        }\n" +
-            "        console.log('[adapter] Falling through to originalInstantiate');\n" +
-            "        return originalInstantiate ? originalInstantiate(source, imports) : Promise.reject(new Error('No WASM support'));\n" +
-            "    };\n" +
-            "}\n\n" +
-            "// === atob polyfill ===\n" +
-            "if (typeof atob === 'undefined') {\n" +
-            "    var atob = function(base64) {\n" +
-            "        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n" +
-            "        var lookup = {};\n" +
-            "        for (var i = 0; i < chars.length; i++) lookup[chars[i]] = i;\n" +
-            "        var output = '';\n" +
-            "        var buffer = 0, bufferLen = 0;\n" +
-            "        for (var j = 0; j < base64.length; j++) {\n" +
-            "            var ch = base64.charAt(j);\n" +
-            "            if (ch === '=') break;\n" +
-            "            buffer = (buffer << 6) | lookup[ch];\n" +
-            "            bufferLen += 6;\n" +
-            "            if (bufferLen >= 8) {\n" +
-            "                bufferLen -= 8;\n" +
-            "                output += String.fromCharCode((buffer >> bufferLen) & 0xFF);\n" +
-            "            }\n" +
-            "        }\n" +
-            "        return output;\n" +
-            "    };\n" +
-            "    globalThis.atob = atob;\n" +
-            "}\n\n" +
-            "console.log('[adapter] C: defining preloadAssets and exports.setup');\n" +
-            "// === Asset preloader ===\n" +
-            "var __preloadedAssets = {};\n" +
-            "globalThis.__preloadedAssets = __preloadedAssets;\n\n" +
-            "exports.preloadAssets = async function(onProgress) {\n" +
-            "    try {\n" +
-            "        var fs = wx.getFileSystemManager();\n" +
-            "        var renameMap = {};\n" +
-            "        try {\n" +
-            "            var mapData = fs.readFileSync('assets/rename-map.json', 'utf-8');\n" +
-            "            renameMap = JSON.parse(mapData);\n" +
-            "            console.log('[adapter] Loaded rename map, entries:', Object.keys(renameMap).length);\n" +
-            "        } catch(e) {\n" +
-            "            console.log('[adapter] No rename-map.json found, proceeding without renaming');\n" +
-            "        }\n" +
-            "        var manifest = '';\n" +
-            "        try {\n" +
-            "            manifest = fs.readFileSync('assets/preload.txt', 'utf-8');\n" +
-            "        } catch(e) {\n" +
-            "            console.log('[adapter] preloadAssets: No manifest file, skipping');\n" +
-            "            return;\n" +
-            "        }\n" +
-            "        var files = [];\n" +
-            "        var lines = manifest.split('\\n');\n" +
-            "        for (var i = 0; i < lines.length; i++) {\n" +
-            "            var line = lines[i].trim();\n" +
-            "            if (!line) continue;\n" +
-            "            var tokens = line.split(':');\n" +
-            "            if (tokens.length < 4) continue;\n" +
-            "            var assetType = tokens[1];\n" +
-            "            var assetPath = tokens[2];\n" +
-            "            if (!assetPath) continue;\n" +
-            "            if (assetType === 'd') {\n" +
-            "                __preloadedAssets[assetPath] = { type: 'dir', data: null };\n" +
-            "            } else {\n" +
-            "                files.push(assetPath);\n" +
-            "            }\n" +
-            "        }\n" +
-            "        var BATCH = 10;\n" +
-            "        for (var i = 0; i < files.length; i += BATCH) {\n" +
-            "            var batch = files.slice(i, Math.min(i + BATCH, files.length));\n" +
-            "            var promises = batch.map(function(assetPath) {\n" +
-            "                return new Promise(function(resolve) {\n" +
-            "                    var readPath = renameMap[assetPath] || assetPath;\n" +
-            "                    fs.readFile({\n" +
-            "                        filePath: 'assets' + readPath,\n" +
-            "                        success: function(res) {\n" +
-            "                            __preloadedAssets[assetPath] = { type: 'file', data: res.data };\n" +
-            "                            resolve();\n" +
-            "                        },\n" +
-            "                        fail: function(err) {\n" +
-            "                            console.error('[adapter] Failed:', assetPath, err.errMsg);\n" +
-            "                            resolve();\n" +
-            "                        }\n" +
-            "                    });\n" +
-            "                });\n" +
-            "            });\n" +
-            "            await Promise.all(promises);\n" +
-            "            if (onProgress) onProgress(Math.min(i + BATCH, files.length), files.length);\n" +
-            "            await new Promise(function(r) { globalThis.requestAnimationFrame(r); });\n" +
-            "        }\n" +
-            "        console.log('[adapter] preloadAssets complete, assets:', Object.keys(__preloadedAssets).length);\n" +
-            "    } catch(e) {\n" +
-            "        console.error('[adapter] preloadAssets error:', e);\n" +
-            "    }\n" +
-            "};\n\n" +
-            "exports.setup = function(canvas) {\n" +
-            "    globalThis.canvas = canvas;\n" +
-            "};\n\n" +
-            "// === XMLHttpRequest polyfill (wraps wx.request) ===\n" +
-            "if (typeof XMLHttpRequest === 'undefined') {\n" +
-            "    var XHR = function() {\n" +
-            "        this.readyState = 0;\n" +
-            "        this.status = 0;\n" +
-            "        this.statusText = '';\n" +
-            "        this.responseText = '';\n" +
-            "        this.response = '';\n" +
-            "        this.responseType = '';\n" +
-            "        this.responseHeaders = {};\n" +
-            "        this._method = '';\n" +
-            "        this._url = '';\n" +
-            "        this._headers = {};\n" +
-            "        this._async = true;\n" +
-            "        this.onreadystatechange = null;\n" +
-            "        this.onerror = null;\n" +
-            "        this.onload = null;\n" +
-            "    };\n" +
-            "    XHR.UNSENT = 0;\n" +
-            "    XHR.OPENED = 1;\n" +
-            "    XHR.HEADERS_RECEIVED = 2;\n" +
-            "    XHR.LOADING = 3;\n" +
-            "    XHR.DONE = 4;\n" +
-            "    XHR.prototype.open = function(method, url, async) {\n" +
-            "        this._method = method;\n" +
-            "        this._url = url;\n" +
-            "        this._async = (async !== false);\n" +
-            "        this.readyState = XHR.OPENED;\n" +
-            "    };\n" +
-            "    XHR.prototype.setRequestHeader = function(name, value) {\n" +
-            "        this._headers[name] = value;\n" +
-            "    };\n" +
-            "    XHR.prototype.send = function(data) {\n" +
-            "        var self = this;\n" +
-            "        var opts = {\n" +
-            "            url: self._url,\n" +
-            "            method: self._method,\n" +
-            "            header: self._headers,\n" +
-            "            data: (data !== undefined && data !== null) ? data : undefined,\n" +
-            "            dataType: 'text',\n" +
-            "            success: function(res) {\n" +
-            "                self.status = res.statusCode;\n" +
-            "                self.statusText = '';\n" +
-            "                self.responseText = (typeof res.data === 'string') ? res.data : JSON.stringify(res.data);\n" +
-            "                self.response = self.responseText;\n" +
-            "                self.responseHeaders = res.header || {};\n" +
-            "                self.readyState = XHR.HEADERS_RECEIVED;\n" +
-            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
-            "                self.readyState = XHR.LOADING;\n" +
-            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
-            "                self.readyState = XHR.DONE;\n" +
-            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
-            "                if (self.onload) self.onload();\n" +
-            "            },\n" +
-            "            fail: function(err) {\n" +
-            "                self.status = 0;\n" +
-            "                self.readyState = XHR.DONE;\n" +
-            "                if (self.onreadystatechange) self.onreadystatechange();\n" +
-            "                if (self.onerror) self.onerror(err);\n" +
-            "            }\n" +
-            "        };\n" +
-            "        wx.request(opts);\n" +
-            "    };\n" +
-            "    XHR.prototype.abort = function() {};\n" +
-            "    XHR.prototype.getAllResponseHeaders = function() {\n" +
-            "        var result = '';\n" +
-            "        for (var k in this.responseHeaders) {\n" +
-            "            if (this.responseHeaders.hasOwnProperty(k)) {\n" +
-            "                result += k + ': ' + this.responseHeaders[k] + '\\r\\n';\n" +
-            "            }\n" +
-            "        }\n" +
-            "        return result;\n" +
-            "    };\n" +
-            "    XHR.prototype.getResponseHeader = function(name) {\n" +
-            "        return this.responseHeaders[name] || null;\n" +
-            "    };\n" +
-            "    XHR.prototype.overrideMimeType = function() {};\n" +
-            "    globalThis.XMLHttpRequest = XHR;\n" +
-            "}\n" +
-            "console.log('[adapter] D: adapter fully loaded');\n";
-
-        FileHandle adapterJs = adapterDir.child("index.js");
+        String js = TemplateUtil.resolve("adapter.js");
+        FileHandle adapterJs = releasePath.child("adapter.js");
         adapterJs.writeString(js, false);
     }
 
     /**
-     * Generate stub game.js in each subpackage root directory.
+     * Generate first-screen.js — WebGL splash screen for loading.
+     * Shows a colored rectangle via scissor+clear to avoid black screen.
+     */
+    private void generateFirstScreen() {
+        String js = TemplateUtil.resolve("first-screen.js");
+        FileHandle firstScreenJs = releasePath.child("first-screen.js");
+        firstScreenJs.writeString(js, false);
+    }
+
+    /**
+     * Generate subpackage entry files — bridge entries for each subpackage.
      * WeChat requires <root>/game.js as the subpackage entry point.
      */
     private void generateSubpackageEntryFiles() {
-        String stub = "// Subpackage entry — loaded by wx.loadSubpackage()\n";
-        releasePath.child("scripts/game.js").writeString(stub, false);
-        releasePath.child("assets/game.js").writeString(stub, false);
+        String engineEntry = TemplateUtil.resolve("subpackage-engine.js");
+        String gameEntry = TemplateUtil.resolve("subpackage-game.js",
+            Map.of("targetFileName", targetFileName));
+        String assetsEntry = TemplateUtil.resolve("subpackage-assets.js");
+
+        releasePath.child("subpackages/engine").mkdirs();
+        releasePath.child("subpackages/game").mkdirs();
+        releasePath.child("subpackages/engine/game.js").writeString(engineEntry, false);
+        releasePath.child("subpackages/game/game.js").writeString(gameEntry, false);
+        releasePath.child("assets/game.js").writeString(assetsEntry, false);
     }
 
     /**
@@ -491,8 +194,8 @@ public class MiniGameBackend extends TeaBackend {
      * so that compiled code can access it.
      */
     private void fixFreetypeModuleScoping() {
-        FileHandle scriptsFolder = releasePath.child("scripts");
-        FileHandle freetypeJs = scriptsFolder.child("freetype.js");
+        FileHandle engineFolder = releasePath.child("subpackages/engine");
+        FileHandle freetypeJs = engineFolder.child("freetype.js");
         if (freetypeJs.exists()) {
             try {
                 String content = freetypeJs.readString();
@@ -508,31 +211,15 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     /**
-     * Move JS files from scripts/ subpackage to root so they can be require()'d.
-     * WeChat's module system doesn't register subpackage JS files as CommonJS modules,
-     * so require('./freetype.js') fails if the file is in scripts/.
-     */
-    private void moveJsFilesToRoot() {
-        FileHandle scriptsFolder = releasePath.child("scripts");
-        // Move freetype.js to root (gdx.wasm.js is already moved in copyAssets)
-        FileHandle freetypeJs = scriptsFolder.child("freetype.js");
-        if (freetypeJs.exists()) {
-            FileHandle freetypeInRoot = releasePath.child("freetype.js");
-            freetypeJs.moveTo(freetypeInRoot);
-            System.out.println("[MiniGameBackend] Moved freetype.js to root (JS files must be in main package)");
-        }
-    }
-
-    /**
-     * Extract embedded WASM binary from gdx.wasm.js and write it as scripts/gdx.wasm.
+     * Extract embedded WASM binary from gdx.wasm.js and write it as subpackages/engine/gdx.wasm.
      * The JS file contains base64 WASM data in a data URL like:
      *   O="data:application/octet-stream;base64,AGFzbQ..."
      * We parse this out, decode the base64, and write the raw bytes as a .wasm file
-     * so WXWebAssembly.instantiate('scripts/gdx.wasm', imports) can find it.
+     * so WXWebAssembly.instantiate('subpackages/engine/gdx.wasm', imports) can find it.
      */
     private void extractWasmFromJs() {
-        // gdx.wasm.js lives in root (not scripts/) — JS files can't be require()'d from subpackages
-        FileHandle wasmJs = releasePath.child("gdx.wasm.js");
+        // gdx.wasm.js lives in subpackages/engine/
+        FileHandle wasmJs = releasePath.child("subpackages/engine/gdx.wasm.js");
         if (!wasmJs.exists()) {
             System.out.println("[MiniGameBackend] WARNING: gdx.wasm.js not found, skipping WASM extraction");
             return;
@@ -547,9 +234,9 @@ public class MiniGameBackend extends TeaBackend {
             }
             String base64Data = matcher.group(1);
             byte[] wasmBytes = Base64.getDecoder().decode(base64Data);
-            // Write the .wasm binary to scripts/ subpackage (WXWebAssembly reads from filesystem)
-            FileHandle scriptsFolder = releasePath.child("scripts");
-            FileHandle wasmFile = scriptsFolder.child("gdx.wasm");
+            // Write the .wasm binary to subpackages/engine/ (WXWebAssembly reads from filesystem)
+            FileHandle engineFolder = releasePath.child("subpackages/engine");
+            FileHandle wasmFile = engineFolder.child("gdx.wasm");
             wasmFile.writeBytes(wasmBytes, false);
             System.out.println("[MiniGameBackend] Extracted gdx.wasm (" + wasmBytes.length + " bytes) from gdx.wasm.js");
         } catch (Exception e) {
@@ -562,24 +249,61 @@ public class MiniGameBackend extends TeaBackend {
     protected void copyAssets(TeaCompilerData data) {
         super.copyAssets(data);
 
-        // Copy scripts to scripts/ directory
-        FileHandle scriptsFolder = releasePath.child("scripts");
-        AssetsCopy.copyResources(classLoader, scripts, scriptFilter, scriptsFolder);
+        // Filter out template resource files that leak into scripts/propertiesResources
+        // via classpath scanning (TeaVMResourceProperties.getResources)
+        scripts.removeIf(path -> path.contains("templates/minigame/"));
 
-        // Move gdx.wasm.js from scripts/ to root — JS files cannot be require()'d from subpackages
-        // because WeChat's module system doesn't register subpackage JS files as CommonJS modules
-        FileHandle wasmJsInScripts = scriptsFolder.child("gdx.wasm.js");
-        if (wasmJsInScripts.exists()) {
-            FileHandle wasmJsInRoot = releasePath.child("gdx.wasm.js");
-            wasmJsInScripts.moveTo(wasmJsInRoot);
-            System.out.println("[MiniGameBackend] Moved gdx.wasm.js to root (JS files must be in main package)");
+        // Clean up template files that leaked into assets/ via propertiesResources
+        FileHandle leakedTemplates = releasePath.child("assets/templates");
+        if (leakedTemplates.exists()) {
+            leakedTemplates.deleteDirectory();
+            System.out.println("[MiniGameBackend] Cleaned up leaked template files from assets/");
         }
+
+        // Remove template references from preload.txt (generated by super.copyAssets)
+        FileHandle preloadTxt = releasePath.child("assets/preload.txt");
+        if (preloadTxt.exists()) {
+            String preload = preloadTxt.readString();
+            String cleaned = preload.lines()
+                .filter(line -> !line.contains("templates/minigame/"))
+                .collect(java.util.stream.Collectors.joining("\n", "", "\n"));
+            preloadTxt.writeString(cleaned, false);
+        }
+
+        // Clean up old directory structure from incremental builds
+        FileHandle oldScripts = releasePath.child("scripts");
+        if (oldScripts.exists()) {
+            oldScripts.deleteDirectory();
+            System.out.println("[MiniGameBackend] Cleaned up old scripts/ directory");
+        }
+        FileHandle oldAdapter = releasePath.child("adapter");
+        if (oldAdapter.exists()) {
+            oldAdapter.deleteDirectory();
+            System.out.println("[MiniGameBackend] Cleaned up old adapter/ directory");
+        }
+        // Clean up old root-level JS files from previous build layout
+        String[] oldRootJs = {"freetype.js", "gdx.wasm.js", "app.js"};
+        for (String js : oldRootJs) {
+            FileHandle oldFile = releasePath.child(js);
+            if (oldFile.exists()) {
+                oldFile.delete();
+                System.out.println("[MiniGameBackend] Cleaned up old root-level " + js);
+            }
+        }
+
+        // Engine subpackage: scripts → subpackages/engine/
+        FileHandle engineFolder = releasePath.child("subpackages/engine");
+        engineFolder.mkdirs();
+        AssetsCopy.copyResources(classLoader, scripts, scriptFilter, engineFolder);
+        // gdx.wasm.js stays in engine folder — NO move to root
 
         // Generate subpackage entry files required by WeChat
         generateSubpackageEntryFiles();
 
         // Extract WASM binary from embedded base64 in gdx.wasm.js
         extractWasmFromJs();
+
+        // Note: app.js move happens in build() post-build step (TeaVM output doesn't exist yet here)
 
         // Rename files with blocked extensions for WeChat readFileSync compatibility
         renameBlockedExtensions();
