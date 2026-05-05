@@ -20,7 +20,11 @@ LibGDX Game (Java/Kotlin)
   backend-minigame/ ──────────┘
        │
        ├── config/backend/MiniGameBackend.java  ──►  Generates WeChat output files
-       │       (game.js, game.json, adapter/index.js, project.config.json)
+       │       (loads templates via TemplateUtil, writes to build output)
+       │
+       ├── config/backend/TemplateUtil.java     ──►  ${var} placeholder substitution
+       │
+       ├── resources/templates/minigame/*.js     ──►  External template files
        │
        ├── bindings/WX.java, WXCanvas.java, WXAudioContext.java  ──►  WeChat API wrappers
        │
@@ -31,6 +35,8 @@ LibGDX Game (Java/Kotlin)
 ```
 
 **Key insight:** `backend-minigame` implements LibGDX backend interfaces (Audio, Input, Graphics, Files, Net, Preferences, etc.) by calling into `bindings/WX*.java` which wraps WeChat's `wx.*` JavaScript APIs via TeaVM's JS interop. The `config/backend/MiniGameBackend.java` handles build-time code generation, producing the WeChat-specific output structure instead of a standard HTML page.
+
+**Template system:** Generated JS/JSON files (`adapter.js`, `game.js`, `game.json`, etc.) are **external template files** under `src/main/resources/templates/minigame/`, loaded at build time by `TemplateUtil` with `${var}` placeholder substitution. **Never embed JS/JSON as Java string concatenation** — always use templates. See [Template System](#template-system) below.
 
 ## Project Structure
 
@@ -58,7 +64,7 @@ LibGDX Game (Java/Kotlin)
 | Package | Contents |
 |---------|----------|
 | `bindings/` | WX API wrappers (`WX.java`, `WXAudioContext.java`, `WXCanvas.java`), callbacks (touch, audio, keyboard, lifecycle, onHide) |
-| `config/backend/` | `MiniGameBackend.java` — generates all WeChat output files (`game.js`, `game.json`, `adapter/index.js`, `project.config.json`) |
+| `config/backend/` | `MiniGameBackend.java` — generates all WeChat output files via `TemplateUtil`; `TemplateUtil.java` — `${var}` placeholder loader |
 | `config/plugins/` | TeaVM plugins (class filter, class transformer, JavaObject exporter) |
 | `filesystem/` | File storage (`FileDB.java`, `MemoryFileStorage.java`, `HEXCoder.java`), storage types (classpath, internal) |
 | `gl/` | WebGL extension interfaces |
@@ -113,11 +119,94 @@ Use the `fix-wechat` prompt template (`.pi/prompts/fix-wechat.md`), or manually:
 4. For compile-time issues: check `config/plugins/` (class filter, transformer)
 5. Fix, rebuild, and re-test
 
-### Updating the adapter / generated output
+### Updating generated output files (adapter, game.js, etc.)
 
-The adapter (`adapter/index.js`) and WeChat config files are **generated at build time** by `MiniGameBackend.java`. Do not edit generated files directly — edit the generation logic in:
+All generated JS/JSON files are **external templates** loaded from `src/main/resources/templates/minigame/`.
 
-- `MiniGameBackend.java` → `generateAdapter()`, `generateGameJs()`, `generateGameJson()`, `generateProjectConfigJson()`
+**To change the content of a generated file** (adapter.js, game.js, game.json, etc.):
+1. Edit the template file in `src/main/resources/templates/minigame/`
+2. If the template needs a new `${var}` placeholder, add it to the template AND update the `TemplateUtil.resolve()` call in `MiniGameBackend.java`
+3. Rebuild and test via the Build-Publish-Test cycle
+
+**⚠️ NEVER embed JS/JSON as Java string concatenation in MiniGameBackend.java.** All generated text files must be external templates.
+
+See [Template System](#template-system) for the full guide.
+
+---
+
+## Template System
+
+`MiniGameBackend.java` generates 8 output files at build time. Instead of embedding JS/JSON as Java string concatenation, each output is a **template resource file** under `src/main/resources/templates/minigame/` with `${var}` placeholders substituted at build time by `TemplateUtil`.
+
+### How it works
+
+```
+templates/minigame/game.json          Template with ${orientation}
+         │
+         ▼  TemplateUtil.resolve("game.json", Map.of("orientation", orientation))
+MiniGameBackend.generateGameJson()    Reads template, substitutes, writes output
+         │
+         ▼
+build/dist/minigame/game.json        Final output with placeholder replaced
+```
+
+### Template files and their placeholders
+
+| Template file | Output path | Method | Placeholders |
+|---|---|---|---|
+| `adapter.js` | `adapter.js` | `generateAdapter()` | none |
+| `first-screen.js` | `first-screen.js` | `generateFirstScreen()` | none |
+| `game.js` | `game.js` | `generateGameJs()` | `${mainClassArgs}` |
+| `game.json` | `game.json` | `generateGameJson()` | `${orientation}` |
+| `project.config.json` | `project.config.json` | `generateProjectConfigJson()` | `${description}`, `${appId}` |
+| `subpackage-engine.js` | `subpackages/engine/game.js` | `generateSubpackageEntryFiles()` | none |
+| `subpackage-game.js` | `subpackages/game/game.js` | `generateSubpackageEntryFiles()` | `${targetFileName}` ×3 |
+| `subpackage-assets.js` | `assets/game.js` | `generateSubpackageEntryFiles()` | none |
+
+### Adding a new generated file
+
+1. Create the template file in `src/main/resources/templates/minigame/`
+2. Add `${var}` placeholders where dynamic values are needed
+3. Add a `generateXxx()` method in `MiniGameBackend.java`:
+   ```java
+   private void generateXxx() {
+       String content = TemplateUtil.resolve("my-template.js",
+           Map.of("myVar", myField));
+       releasePath.child("output.js").writeString(content, false);
+   }
+   ```
+4. Call the method from `setupMinigame()` or `copyAssets()` as appropriate
+5. Rebuild and test
+
+### Template rules
+
+1. **LF only** — no CRLF. Enforced via `.gitattributes`: `src/main/resources/templates/** text eol=lf`
+2. **End with exactly one newline** — no trailing blank lines
+3. **No `${` in JS content** — current JS uses string concatenation (`+`), not ES6 template literals. If `${` is needed in JS output, add escaping support to `TemplateUtil`
+4. **Never modify inline** — always edit the template file, never put content back into Java string concatenation
+
+### Why templates?
+
+- **Readability**: 200-line JS files are readable as `.js` files, not as `"..." +` chains
+- **Editability**: IDE syntax highlighting, linting, and formatting work on `.js`/`.json` files
+- **Reviewability**: diffs show meaningful changes to the JS/JSON, not Java string escaping noise
+- **Safety**: `TemplateUtil` throws `RuntimeException` with a clear message if a template is missing
+
+### Classpath leak prevention
+
+Template resources live in `src/main/resources/templates/minigame/`. The shared `TeaVMResourceProperties` classpath scanner finds them and copies them to the output along with game assets. `MiniGameBackend.copyAssets()` prevents this:
+
+1. `scripts.removeIf(path -> path.contains("templates/minigame/"))` — removes templates from the scripts list
+2. Deletes any `assets/templates/` directory that was copied
+3. Filters `preload.txt` entries that reference template paths
+
+When adding new templates, verify they don't leak into the output by checking the build output:
+```bash
+find minigame/build/dist/minigame -path "*/templates/*" -type f
+# Should return nothing
+```
+
+---
 
 ### Understanding how a LibGDX interface maps to WeChat
 

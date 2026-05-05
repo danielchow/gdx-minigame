@@ -1,4 +1,7 @@
 [-SNAPSHOT]
+- Extract embedded JS/JSON string templates from MiniGameBackend.java into 8 external template files with `TemplateUtil` for `${var}` placeholder substitution
+- Add `.gitattributes` to enforce LF line endings for template resource files
+- Filter leaked template resource files from classpath scanning in `copyAssets()`
 
 [1.2.1]
 - Updated to libgdx 1.13.5
