@@ -63,10 +63,11 @@ LibGDX Game (Java/Kotlin)
 
 | Package | Contents |
 |---------|----------|
-| `bindings/` | WX API wrappers (`WX.java`, `WXAudioContext.java`, `WXCanvas.java`), callbacks (touch, audio, keyboard, lifecycle, onHide) |
+| `bindings/` | WX API wrappers (`WX.java`, `WXAudioContext.java`, `WXCanvas.java`), ad wrappers (`WXAdUtils.java`, `WXCustomAd.java`, `WXInterstitialAd.java`, `WXRewardedVideoAd.java`), callbacks (touch, audio, keyboard, lifecycle, onHide, ad events) |
 | `config/backend/` | `MiniGameBackend.java` — generates all WeChat output files via `TemplateUtil`; `TemplateUtil.java` — `${var}` placeholder loader |
+| `config/` | `MiniGameBuildConfiguration.java` — user-facing config class (appId, description, orientation, etc.). Add new config fields here; `MiniGameBackend` consumes them. |
 | `config/plugins/` | TeaVM plugins (class filter, class transformer, JavaObject exporter) |
-| `filesystem/` | File storage (`FileDB.java`, `MemoryFileStorage.java`, `HEXCoder.java`), storage types (classpath, internal) |
+| `filesystem/` | File storage (`FileDB.java`, `MemoryFileStorage.java`, `PersistentFileStorage.java`, `FileData.java`, `HEXCoder.java`), storage types (classpath, internal) |
 | `gl/` | WebGL extension interfaces |
 | `dom/` | DOM emulation (TeaVM navigator) |
 | `utils/` | `KeyCodes.java`, `Timer.java`, `PNG.java` |
@@ -78,7 +79,8 @@ LibGDX Game (Java/Kotlin)
 |------|---------|
 | `references/api-index.md` | Index of all 904 WeChat API docs across 22 categories |
 | `references/wechat-minigame/` | 19 WeChat technical guides (QuickStart, TechPrinciple, adapters, FAQ) |
-| `references/wx-api-docs/` | Full WeChat API docs organized by category |
+| `references/wx-api-docs/` | Full WeChat minigame API docs organized by category |
+| `references/miniprogram-api-docs/` | WeChat miniprogram API docs (overlaps with minigame; useful for APIs shared between miniprogram and minigame) |
 
 **Most relevant WX API categories for this project:**
 - `render/` — canvas, frame, image, font (used by `MiniGameGraphics`, `WXCanvas`)
@@ -89,6 +91,14 @@ LibGDX Game (Java/Kotlin)
 - `file/` — file system access (used by `MiniGameFiles`, `MiniGameFileHandle`)
 
 > 💡 When implementing a new feature, always check **both** the web backend (`backend-web/`) for the LibGDX interface pattern **and** `references/wx-api-docs/` for the WeChat API that provides the equivalent capability.
+
+### Other Modules
+
+The repo also contains `extensions/` (asset-loader, freetype, controllers) and `examples/` (basic, freetype, gdx-tests) from upstream. These are registered in `settings.gradle.kts` but are **not part of the minigame backend** — do not modify them for minigame work.
+
+### Top-Level Agent Artifacts
+
+`context.md`, `plan.md`, and `progress.md` are transient agent planning files — **do not treat them as authoritative project documentation**.
 
 ### Build Config
 
@@ -180,7 +190,7 @@ build/dist/minigame/game.json        Final output with placeholder replaced
 
 ### Template rules
 
-1. **LF only** — no CRLF. Enforced via `.gitattributes`: `src/main/resources/templates/** text eol=lf`
+1. **LF only** — no CRLF. Enforced via `.gitattributes` (`* text=auto eol=lf` — global LF policy)
 2. **End with exactly one newline** — no trailing blank lines
 3. **No `${` in JS content** — current JS uses string concatenation (`+`), not ES6 template literals. If `${` is needed in JS output, add escaping support to `TemplateUtil`
 4. **Never modify inline** — always edit the template file, never put content back into Java string concatenation
@@ -191,6 +201,16 @@ build/dist/minigame/game.json        Final output with placeholder replaced
 - **Editability**: IDE syntax highlighting, linting, and formatting work on `.js`/`.json` files
 - **Reviewability**: diffs show meaningful changes to the JS/JSON, not Java string escaping noise
 - **Safety**: `TemplateUtil` throws `RuntimeException` with a clear message if a template is missing
+
+### Non-template build steps
+
+`MiniGameBackend.java` also performs post-processing that isn't template-based. Be aware of these when modifying build output:
+
+| Method | Purpose |
+|--------|---------|
+| `fixFreetypeModuleScoping()` | Wraps freetype JS in an IIFE to avoid module scope conflicts |
+| `extractWasmFromJs()` | Extracts embedded WASM binary from TeaVM's combined JS output into a separate `.wasm` file |
+| `renameBlockedExtensions()` | Appends `.txt` to file extensions that WeChat blocks (e.g. `.wasm` → `.wasm.txt`) and generates `rename-map.json` for runtime lookup |
 
 ### Classpath leak prevention
 
@@ -219,6 +239,7 @@ find minigame/build/dist/minigame -path "*/templates/*" -type f
 | `Net` | `MiniGameNet` | `network/` |
 | `Preferences` | `MiniGamePreferences` | `storage/` |
 | `Application` | `MiniGameApplication` | `base/` (lifecycle) |
+| `Clipboard` | `MiniGameClipboard` | — |
 
 ---
 
