@@ -26,7 +26,7 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public String getScriptUrl() {
-        return "scripts/";
+        return "subpackages/engine/";
     }
 
     @Override
