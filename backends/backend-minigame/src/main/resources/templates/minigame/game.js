@@ -70,7 +70,7 @@ async function startGame() {
         var mainModule = globalThis.__gameApp;
         if (mainModule && mainModule.main) {
             console.log('[game.js] Calling main()...');
-            mainModule.main(["${mainClassArgs}"]);
+            mainModule.main([${mainClassArgs}]);
             console.log('[game.js] main() returned');
         } else {
             console.error('[game.js] ERROR: __gameApp not available, cannot call main()');
