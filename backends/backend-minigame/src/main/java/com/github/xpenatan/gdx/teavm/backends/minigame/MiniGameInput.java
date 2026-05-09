@@ -41,7 +41,7 @@ public class MiniGameInput extends AbstractInput {
 
     private int mouseLastX = 0;
     private int mouseLastY = 0;
-    private int currentEventTimeStamp = 0;
+    private long currentEventTimeStamp = 0;
 
     // Cached scale factors for touch coordinate mapping
     private float touchScaleX;
@@ -74,7 +74,7 @@ public class MiniGameInput extends AbstractInput {
     }
 
     private void handleTouchEvent(JSObject event, int type) {
-        currentEventTimeStamp = (int)(TimeUtils.nanoTime() / 1000000);
+        currentEventTimeStamp = TimeUtils.nanoTime();
         JSArrayReader<Touch> changedTouches = getChangedTouches(event);
         if (changedTouches == null) return;
 
