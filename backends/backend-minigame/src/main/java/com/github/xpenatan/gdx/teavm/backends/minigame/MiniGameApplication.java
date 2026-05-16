@@ -221,13 +221,11 @@ public class MiniGameApplication implements Application {
             }
             runnablesHelper.clear();
             graphics.frameId++;
-            if (graphics.frameId > 5) {
-                graphics.render(appListener);
-                if (!firstFrameTimed) {
-                    firstFrameTimed = true;
-                    System.out.println("[PERF] phase=first_frame_render end=" + System.currentTimeMillis());
-                    markFirstFrameJS();
-                }
+            graphics.render(appListener);
+            if (!firstFrameTimed) {
+                firstFrameTimed = true;
+                System.out.println("[PERF] phase=first_frame_render end=" + System.currentTimeMillis());
+                markFirstFrameJS();
             }
             input.reset();
 
