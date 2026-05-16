@@ -32,6 +32,10 @@ import org.teavm.jso.webgl.WebGLUniformLocation;
  */
 public class WebGL20 implements GL20 {
 
+    // Performance counters for texture upload timing
+    private static int texUploadCount = 0;
+    private static long totalTexUploadMs = 0;
+
     @JSClass
     static class CustomIntMap<T extends JSObject> implements JSObject {
         @JSBody(script = "return [undefined];")
@@ -812,6 +816,7 @@ public class WebGL20 implements GL20 {
             gl.texImage2D(target, level, internalformat, width, height, border, format, type, (ArrayBufferView)null);
             return;
         }
+        long uploadStart = System.currentTimeMillis();
         ArrayBufferView arrayBuffer;
         if(type == WebGLRenderingContext.UNSIGNED_BYTE) {
             arrayBuffer = TypedArrays.getUint8Array(pixels);
@@ -827,6 +832,10 @@ public class WebGL20 implements GL20 {
         }
 
         gl.texImage2D(target, level, internalformat, width, height, border, format, type, arrayBuffer);
+        texUploadCount++;
+        long uploadDur = System.currentTimeMillis() - uploadStart;
+        totalTexUploadMs += uploadDur;
+        System.out.println("[PERF] phase=texture_upload tex=" + texUploadCount + " size=" + width + "x" + height + " dur=" + uploadDur + " total_upload_ms=" + totalTexUploadMs);
     }
 
     @Override

@@ -121,6 +121,10 @@ var __preloadedAssets = {};
 globalThis.__preloadedAssets = __preloadedAssets;
 
 exports.preloadAssets = async function(onProgress) {
+    var __preloadStart = Date.now();
+    var __fileCount = 0;
+    var __totalBytes = 0;
+    console.log('[PERF] phase=preload_fs_read start=' + __preloadStart);
     try {
         var fs = wx.getFileSystemManager();
         var renameMap = {};
@@ -168,6 +172,7 @@ exports.preloadAssets = async function(onProgress) {
                 files.push(assetPath);
             }
         }
+        console.log('[PERF] phase=preload_manifest_parsed file_count=' + files.length + ' dur=' + (Date.now() - __preloadStart));
         var BATCH = 10;
         for (var i = 0; i < files.length; i += BATCH) {
             var batch = files.slice(i, Math.min(i + BATCH, files.length));
@@ -178,6 +183,8 @@ exports.preloadAssets = async function(onProgress) {
                         filePath: 'assets' + readPath,
                         success: function(res) {
                             __preloadedAssets[assetPath] = { type: 'file', data: res.data };
+                            __fileCount++;
+                            if (res.data && res.data.byteLength) __totalBytes += res.data.byteLength;
                             resolve();
                         },
                         fail: function(err) {
@@ -190,8 +197,13 @@ exports.preloadAssets = async function(onProgress) {
             });
             await Promise.all(promises);
             if (onProgress) onProgress(Math.min(i + BATCH, files.length), files.length);
+            if ((i + BATCH) % 50 === 0 || i + BATCH >= files.length) {
+                console.log('[PERF] phase=preload_batch files_so_far=' + Math.min(i + BATCH, files.length) + '/' + files.length + ' dur=' + (Date.now() - __preloadStart));
+            }
             await new Promise(function(r) { globalThis.requestAnimationFrame(r); });
         }
+        var __preloadEnd = Date.now();
+        console.log('[PERF] phase=preload_fs_read end=' + __preloadEnd + ' dur=' + (__preloadEnd - __preloadStart) + ' files=' + __fileCount + ' bytes=' + __totalBytes);
         console.log('[adapter] preloadAssets complete, assets:', Object.keys(__preloadedAssets).length);
     } catch(e) {
         console.error('[adapter] preloadAssets error:', e);

@@ -13,6 +13,9 @@ import org.teavm.jso.typedarrays.Int8Array;
 
 public class Gdx2DPixmapNative implements Disposable {
 
+    private static int decodeCount = 0;
+    private static long totalDecodeMs = 0;
+
     int basePtr;
     int width;
     int height;
@@ -24,7 +27,12 @@ public class Gdx2DPixmapNative implements Disposable {
     private ByteBuffer buffer;
 
     public Gdx2DPixmapNative(byte[] encodedData, int offset, int len, int requestedFormat) {
+        long decodeStart = System.currentTimeMillis();
         nativeData = loadNative(encodedData, offset, len);
+        long decodeDur = System.currentTimeMillis() - decodeStart;
+        decodeCount++;
+        totalDecodeMs += decodeDur;
+        System.out.println("[PERF] phase=image_decode img=" + decodeCount + " bytes=" + len + " dur=" + decodeDur + " total_decode_ms=" + totalDecodeMs);
         updateNativeData();
 
         if(requestedFormat != 0 && requestedFormat != format) {

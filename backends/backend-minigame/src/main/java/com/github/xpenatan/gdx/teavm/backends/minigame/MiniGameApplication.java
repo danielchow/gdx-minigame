@@ -45,6 +45,8 @@ public class MiniGameApplication implements Application {
     private static final String WEB_SCRIPT_PATH = "WEB_SCRIPT_PATH";
     private static final String WEB_ASSET_PATH = "WEB_ASSET_PATH";
 
+    private boolean firstFrameTimed = false;
+
     public static MiniGameApplication get() {
         return (MiniGameApplication) Gdx.app;
     }
@@ -84,6 +86,8 @@ public class MiniGameApplication implements Application {
     }
 
     protected void init() {
+        long initStart = System.currentTimeMillis();
+        System.out.println("[PERF] phase=java_init start=" + initStart);
         updateErrorStack();
 
         // Set system properties
@@ -111,11 +115,14 @@ public class MiniGameApplication implements Application {
         input = new MiniGameInput(this, graphics.canvas);
         files = new MiniGameFiles(config, this);
         preloadAssetsIntoStorage();
+        long afterPreload = System.currentTimeMillis();
+        System.out.println("[PERF] phase=java_init after_preload dur=" + (afterPreload - initStart));
         net = new MiniGameNet();
         logger = new WebApplicationLogger();
         clipboard = new MiniGameClipboard();
 
         initNativeLibraries();
+        System.out.println("[PERF] phase=java_init after_native_libs dur=" + (System.currentTimeMillis() - initStart));
 
         // Set Gdx singletons
         Gdx.app = this;
@@ -130,6 +137,8 @@ public class MiniGameApplication implements Application {
         Gdx.net = net;
         this.audio = new MiniGameAudio();
         Gdx.audio = audio;
+
+        System.out.println("[PERF] phase=java_init after_setup dur=" + (System.currentTimeMillis() - initStart));
 
         // Lifecycle: wx.onHide → pause
         WX.onHide((OnHideCallback) () -> {
@@ -166,6 +175,7 @@ public class MiniGameApplication implements Application {
             }
         };
 
+        System.out.println("[PERF] phase=java_init end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - initStart));
         // Start
         WX.requestAnimationFrame(callback -> {
             step(curListener);
@@ -191,7 +201,10 @@ public class MiniGameApplication implements Application {
                 input.reset();
                 runnables.clear();
                 graphics.frameId = 0;
+                long createStart = System.currentTimeMillis();
+                System.out.println("[PERF] phase=app_create start=" + createStart);
                 appListener.create();
+                System.out.println("[PERF] phase=app_create end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - createStart));
                 resizeBypass = true;
             }
 
@@ -210,6 +223,11 @@ public class MiniGameApplication implements Application {
             graphics.frameId++;
             if (graphics.frameId > 5) {
                 graphics.render(appListener);
+                if (!firstFrameTimed) {
+                    firstFrameTimed = true;
+                    System.out.println("[PERF] phase=first_frame_render end=" + System.currentTimeMillis());
+                    markFirstFrameJS();
+                }
             }
             input.reset();
 
@@ -273,6 +291,9 @@ public class MiniGameApplication implements Application {
     @JSBody(params = "text", script = "console.log(text);")
     public static native void print(String text);
 
+    @JSBody(script = "globalThis.__perfFirstFrame = Date.now();")
+    private static native void markFirstFrameJS();
+
     @JSBody(script = "return globalThis.canvas;")
     private static native JSObject getGlobalCanvas();
 
@@ -294,29 +315,44 @@ public class MiniGameApplication implements Application {
     private static native void clearPreloadedAssets();
 
     private void preloadAssetsIntoStorage() {
+        long transferStart = System.currentTimeMillis();
+        System.out.println("[PERF] phase=js_to_java_transfer start=" + transferStart);
         int count = getPreloadedAssetCount();
         if (count == 0) {
             System.out.println("[MiniGameApplication] No preloaded assets found");
+            System.out.println("[PERF] phase=js_to_java_transfer end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - transferStart) + " files=0 dirs=0 bytes=0");
+            System.out.println("[PERF] phase=js_to_java_transfer total_dur=" + (System.currentTimeMillis() - transferStart));
             return;
         }
+        System.out.println("[PERF] phase=js_to_java_transfer asset_count=" + count);
         System.out.println("[MiniGameApplication] Preloading " + count + " assets into InternalStorage...");
+        long loopStart = System.currentTimeMillis();
+        int fileCount = 0;
+        int dirCount = 0;
+        long totalBytes = 0;
         for (int i = 0; i < count; i++) {
             String path = getPreloadedAssetPath(i);
             if (path == null) continue;
             String type = getPreloadedAssetType(path);
             if ("dir".equals(type)) {
                 files.internalStorage.putFolderInternal(path);
+                dirCount++;
             } else {
                 ArrayBuffer arrayBuffer = getPreloadedAssetArrayBuffer(path);
                 if (arrayBuffer != null) {
                     Int8Array int8Array = new Int8Array(arrayBuffer);
                     byte[] bytes = TypedArrays.toByteArray(int8Array);
+                    totalBytes += bytes.length;
                     files.internalStorage.putFileInternal(path, bytes);
+                    fileCount++;
                 }
             }
         }
+        long loopEnd = System.currentTimeMillis();
+        System.out.println("[PERF] phase=js_to_java_transfer end=" + loopEnd + " dur=" + (loopEnd - loopStart) + " files=" + fileCount + " dirs=" + dirCount + " bytes=" + totalBytes);
         System.out.println("[MiniGameApplication] Asset preloading complete");
         clearPreloadedAssets();
+        System.out.println("[PERF] phase=js_to_java_transfer total_dur=" + (System.currentTimeMillis() - transferStart));
     }
 
     // === Native library loading ===
