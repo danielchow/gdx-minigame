@@ -1,6 +1,10 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types;
 
-import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.MemoryFileStorage;
-
-public class ClasspathStorage extends MemoryFileStorage {
+/**
+ * Classpath storage marker — unused since MiniGameFiles shares the
+ * InternalStorage instance for both internal and classpath types.
+ *
+ * Kept for source compatibility; not instantiated.
+ */
+public class ClasspathStorage {
 }

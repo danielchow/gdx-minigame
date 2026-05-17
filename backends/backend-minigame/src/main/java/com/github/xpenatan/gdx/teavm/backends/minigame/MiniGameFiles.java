@@ -4,9 +4,7 @@ import com.badlogic.gdx.Files;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.FileDB;
-import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.MemoryFileStorage;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.PersistentFileStorage;
-import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.ClasspathStorage;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.InternalStorage;
 
 /**
@@ -16,14 +14,14 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.Internal
  */
 public class MiniGameFiles implements Files {
 
-    public MemoryFileStorage internalStorage;
-    public MemoryFileStorage classpathStorage;
+    public FileDB internalStorage;
+    public FileDB classpathStorage;
     public FileDB localStorage;
     public String localStoragePrefix;
 
     public MiniGameFiles(MiniGameApplicationConfiguration config, MiniGameApplication application) {
         this.internalStorage = new InternalStorage();
-        this.classpathStorage = this.internalStorage;  // Share same storage — all assets preloaded into internal
+        this.classpathStorage = this.internalStorage;  // Share same storage — on-demand reads from assets/
         this.localStorage = new PersistentFileStorage(config.localStoragePrefix);
         localStoragePrefix = config.localStoragePrefix;
     }

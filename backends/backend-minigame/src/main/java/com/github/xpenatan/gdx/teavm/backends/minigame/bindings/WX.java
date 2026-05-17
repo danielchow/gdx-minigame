@@ -152,6 +152,9 @@ public final class WX {
     @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readFileSync(path); } catch(e) { return null; }")
     public static native ArrayBuffer fsReadFileSync(JSObject fsm, String path);
 
+    @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readFileSync(path, 'utf-8'); } catch(e) { return null; }")
+    public static native String fsReadFileSyncText(JSObject fsm, String path);
+
     @JSBody(params = {"fsm", "path", "data"}, script = "fsm.writeFileSync(path, data);")
     public static native void fsWriteFileSync(JSObject fsm, String path, JSObject data);
 

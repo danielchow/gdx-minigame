@@ -18,15 +18,12 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.OnHideCallback;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
-import com.github.xpenatan.gdx.teavm.backends.minigame.dom.typedarray.TypedArrays;
 import com.github.xpenatan.jmultiplatform.core.JMultiplatform;
 import com.github.xpenatan.jmultiplatform.core.JPlatformMap;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSExceptions;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.browser.AnimationFrameCallback;
-import org.teavm.jso.typedarrays.ArrayBuffer;
-import org.teavm.jso.typedarrays.Int8Array;
 
 import java.util.ArrayList;
 
@@ -76,7 +73,6 @@ public class MiniGameApplication implements Application {
     private final Array<Runnable> runnablesHelper = new Array<>();
 
     private boolean stepError;
-    private boolean isPreloadReady = false;
 
     public MiniGameApplication(ApplicationListener appListener, MiniGameApplicationConfiguration config) {
         this.config = config;
@@ -114,9 +110,8 @@ public class MiniGameApplication implements Application {
         graphics = createGraphics(config);
         input = new MiniGameInput(this, graphics.canvas);
         files = new MiniGameFiles(config, this);
-        preloadAssetsIntoStorage();
-        long afterPreload = System.currentTimeMillis();
-        System.out.println("[PERF] phase=java_init after_preload dur=" + (afterPreload - initStart));
+        long afterFiles = System.currentTimeMillis();
+        System.out.println("[PERF] phase=java_init after_files dur=" + (afterFiles - initStart));
         net = new MiniGameNet();
         logger = new WebApplicationLogger();
         clipboard = new MiniGameClipboard();
@@ -294,64 +289,6 @@ public class MiniGameApplication implements Application {
 
     @JSBody(script = "return globalThis.canvas;")
     private static native JSObject getGlobalCanvas();
-
-    // === Asset preloading ===
-
-    @JSBody(script = "return globalThis.__preloadedAssets ? Object.keys(globalThis.__preloadedAssets).length : 0;")
-    private static native int getPreloadedAssetCount();
-
-    @JSBody(params = "index", script = "var keys = Object.keys(globalThis.__preloadedAssets); return keys[index] || null;")
-    private static native String getPreloadedAssetPath(int index);
-
-    @JSBody(params = "path", script = "var entry = globalThis.__preloadedAssets[path]; return entry ? entry.type : null;")
-    private static native String getPreloadedAssetType(String path);
-
-    @JSBody(params = "path", script = "var entry = globalThis.__preloadedAssets[path]; if (!entry || !entry.data) return null; return entry.data;")
-    private static native ArrayBuffer getPreloadedAssetArrayBuffer(String path);
-
-    @JSBody(script = "delete globalThis.__preloadedAssets;")
-    private static native void clearPreloadedAssets();
-
-    private void preloadAssetsIntoStorage() {
-        long transferStart = System.currentTimeMillis();
-        System.out.println("[PERF] phase=js_to_java_transfer start=" + transferStart);
-        int count = getPreloadedAssetCount();
-        if (count == 0) {
-            System.out.println("[MiniGameApplication] No preloaded assets found");
-            System.out.println("[PERF] phase=js_to_java_transfer end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - transferStart) + " files=0 dirs=0 bytes=0");
-            System.out.println("[PERF] phase=js_to_java_transfer total_dur=" + (System.currentTimeMillis() - transferStart));
-            return;
-        }
-        System.out.println("[PERF] phase=js_to_java_transfer asset_count=" + count);
-        System.out.println("[MiniGameApplication] Preloading " + count + " assets into InternalStorage...");
-        long loopStart = System.currentTimeMillis();
-        int fileCount = 0;
-        int dirCount = 0;
-        long totalBytes = 0;
-        for (int i = 0; i < count; i++) {
-            String path = getPreloadedAssetPath(i);
-            if (path == null) continue;
-            String type = getPreloadedAssetType(path);
-            if ("dir".equals(type)) {
-                files.internalStorage.putFolderInternal(path);
-                dirCount++;
-            } else {
-                ArrayBuffer arrayBuffer = getPreloadedAssetArrayBuffer(path);
-                if (arrayBuffer != null) {
-                    Int8Array int8Array = new Int8Array(arrayBuffer);
-                    byte[] bytes = TypedArrays.toByteArray(int8Array);
-                    totalBytes += bytes.length;
-                    files.internalStorage.putFileInternal(path, bytes);
-                    fileCount++;
-                }
-            }
-        }
-        long loopEnd = System.currentTimeMillis();
-        System.out.println("[PERF] phase=js_to_java_transfer end=" + loopEnd + " dur=" + (loopEnd - loopStart) + " files=" + fileCount + " dirs=" + dirCount + " bytes=" + totalBytes);
-        System.out.println("[MiniGameApplication] Asset preloading complete");
-        clearPreloadedAssets();
-        System.out.println("[PERF] phase=js_to_java_transfer total_dur=" + (System.currentTimeMillis() - transferStart));
-    }
 
     // === Native library loading ===
 

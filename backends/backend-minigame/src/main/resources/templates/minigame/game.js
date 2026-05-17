@@ -50,40 +50,19 @@ function loadSubpackage(name) {
 
 async function startGame() {
     try {
-        // Phase 1: Load engine and assets in parallel
-        console.log('[game.js] Loading engine and assets in parallel...');
+        // Phase 1: Load all subpackages in parallel
+        console.log('[game.js] Loading all subpackages in parallel...');
         __perfMark('subpackages_start');
         await Promise.all([
             loadSubpackage('engine'),
-            loadSubpackage('assets')
+            loadSubpackage('assets'),
+            loadSubpackage('game')
         ]);
         __perfMark('subpackages_done');
         __perfReport('phase1_subpackages', 'subpackages_start');
-        console.log('[game.js] Engine and assets subpackages loaded');
+        console.log('[game.js] All subpackages loaded');
 
-        // Phase 2+3+4: Overlap game subpackage load with preload and engine wait.
-        // We kick off loadSubpackage('game') immediately (non-blocking), then run preload
-        // and engine wait sequentially. The game subpackage loads in the background via
-        // wx.loadSubpackage's own callback — no Promise.all needed.
-        // Safe because: require('./app.js') is pure class registration (no $clinit, no
-        // asset/WASM access during module eval), __preloadedAssets is only read inside main().
-
-        // Step 1: Fire off game subpackage load immediately (runs in background)
-        console.log('[game.js] Kicking off game subpackage load in background...');
-        __perfMark('game_code_start');
-        var gameLoadPromise = loadSubpackage('game');
-
-        // Step 2: Preload assets (game subpackage loads concurrently via wx callback)
-        console.log('[game.js] Preloading assets (game subpackage loading in background)...');
-        __perfMark('preload_start');
-        await adapter.preloadAssets(function(loaded, total) {
-            firstScreen.setProgress(loaded / total);
-        });
-        __perfMark('preload_done');
-        __perfReport('phase2_preload_assets', 'preload_start');
-        console.log('[game.js] Assets preloaded, count:', globalThis.__preloadedAssets ? Object.keys(globalThis.__preloadedAssets).length : 0);
-
-        // Step 3: Wait for engine to initialize (Gdx bridge set by gdx.wasm.js)
+        // Phase 3: Wait for engine to initialize (Gdx bridge set by gdx.wasm.js)
         console.log('[game.js] Waiting for engine initialization...');
         __perfMark('engine_wait_start');
         var gdxWaitStart = Date.now();
@@ -96,14 +75,6 @@ async function startGame() {
         __perfMark('engine_ready');
         __perfReport('phase3_engine_wait', 'engine_wait_start');
         console.log('[game.js] window.Gdx available, type:', typeof window.Gdx);
-
-        // Step 4: Await game subpackage (may already be done — loads overlapped with steps 2+3)
-        __perfMark('await_game_start');
-        await gameLoadPromise;
-        __perfMark('game_code_done');
-        __perfReport('phase4_game_code', 'game_code_start');
-        __perfReport('phase4_await_game', 'await_game_start');
-        console.log('[game.js] Game code subpackage loaded (overlapped:', (__perf.marks['await_game_start'] !== undefined && __perf.marks['game_code_done'] !== undefined) ? (__perf.marks['game_code_done'] - __perf.marks['await_game_start']) + 'ms await' : 'N/A', ')');
 
         // Phase 5: Start the compiled game via globalThis bridge
         var mainModule = globalThis.__gameApp;
@@ -128,9 +99,7 @@ async function startGame() {
             var safe = function(a, b) { return (m[a] !== undefined && m[b] !== undefined) ? (m[a] - m[b]) : 'N/A'; };
             console.log('[PERF] summary total_ms=' + safe('first_frame_complete', 'game_js_entry') +
                 ' subpackages_ms=' + safe('subpackages_done', 'subpackages_start') +
-                ' preload_ms=' + safe('preload_done', 'preload_start') +
                 ' engine_wait_ms=' + safe('engine_ready', 'engine_wait_start') +
-                ' game_code_ms=' + safe('game_code_done', 'game_code_start') +
                 ' main_ms=' + safe('main_returned', 'main_call'));
         })();
     } catch (err) {
