@@ -107,8 +107,12 @@ async function startGame() {
             __perfReport('phase1_game', 'subpackages_start');
         });
 
-        // Wait for everything: Gdx ready + game loaded + assets ready (with pre-cached manifests)
+        // Wait for Gdx ready + game loaded + assets ready (with pre-cached manifests)
+        // gdxPromise resolves only after engine subpackage loads (window.Gdx set by gdx.wasm.js),
+        // which means freetype-loader.js has already set globalThis.__freetypeReady by this point.
         await Promise.all([gdxPromise, gameReadyPromise, assetsReadyPromise]);
+        // Now await freetype WASM — guaranteed to be set since engine subpackage is loaded
+        if (globalThis.__freetypeReady) await globalThis.__freetypeReady;
         __perfMark('all_ready');
         __perfReport('phase1_pipeline', 'subpackages_start');
 

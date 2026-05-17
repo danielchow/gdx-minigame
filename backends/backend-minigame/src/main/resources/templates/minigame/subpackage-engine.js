@@ -3,11 +3,11 @@
 
 console.log('[engine] game.js executing');
 try {
-    var freetype = require('./freetype.js');
+    var freetype = require('./freetype-loader.js');
     globalThis.__engineExports = globalThis.__engineExports || {};
     globalThis.__engineExports['freetype'] = freetype;
-    console.log('[engine] freetype.js loaded, exports:', typeof freetype);
-} catch(e) { console.error('[engine] freetype.js require failed:', e.message); }
+    console.log('[engine] freetype-loader.js loaded, exports:', typeof freetype);
+} catch(e) { console.error('[engine] freetype-loader.js require failed:', e.message); }
 
 try {
     var wasmModule = require('./gdx.wasm.js');

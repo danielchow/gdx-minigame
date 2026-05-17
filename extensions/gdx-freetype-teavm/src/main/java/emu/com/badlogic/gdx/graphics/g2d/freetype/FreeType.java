@@ -147,7 +147,7 @@ public class FreeType {
         public void dispose() {
             doneFace(address);
             Integer freeAddress = library.fontData.get(address);
-            if(freeAddress != 0) { // Don't free 'zero' address
+            if(freeAddress != null && freeAddress != 0) { // Don't free 'zero' or missing address
                 library.fontData.remove(address);
                 nativeFree(freeAddress);
             }
@@ -645,7 +645,6 @@ public class FreeType {
                 converted.setBlending(Pixmap.Blending.SourceOver);
                 pixmap.dispose();
             }
-            converted.drawRectangle(0, 0, 1000, 1000);
             return converted;
         }
         // @off

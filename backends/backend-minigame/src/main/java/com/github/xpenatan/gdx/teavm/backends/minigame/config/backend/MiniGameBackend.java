@@ -190,39 +190,12 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     /**
-     * Fix freetype.js Module scoping — inject globalThis.Module = Module
-     * so that compiled code can access it.
+     * FreeType WASM module scoping is handled by freetype-loader.js,
+     * which bridges the modularized WASM exports to globalThis.Module.
+     * No string patching needed for the WASM-based build.
      */
     private void fixFreetypeModuleScoping() {
-        FileHandle engineFolder = releasePath.child("subpackages/engine");
-        FileHandle freetypeJs = engineFolder.child("freetype.js");
-        if (freetypeJs.exists()) {
-            try {
-                String content = freetypeJs.readString();
-
-                // Patch 1: Make freetype.js use the shared globalThis.Module instead of
-                // creating its own empty {}. The adapter initializes globalThis.Module = {}
-                // before any subpackage loads, so freetype.js gets the shared object.
-                // Original: var Module=typeof Module!=="undefined"?Module:{};
-                // Patched:  var Module=globalThis.Module||{};
-                content = content.replace(
-                    "var Module=typeof Module!==\"undefined\"?Module:{};",
-                    "var Module=globalThis.Module||{};"
-                );
-
-                // Patch 2: Set globalThis.Module after FreeType functions are initialized.
-                // With the shared-Module approach, this is technically a no-op (Module IS
-                // globalThis.Module), but kept for robustness.
-                content = content.replace(
-                    "Module[\"noExitRuntime\"]=true;",
-                    "Module[\"noExitRuntime\"]=true;if(typeof globalThis!==\"undefined\"){globalThis.Module=Module}"
-                );
-
-                freetypeJs.writeString(content, false);
-            } catch (Exception e) {
-                // Non-critical, continue
-            }
-        }
+        System.out.println("[MiniGameBackend] FreeType WASM — scoping handled by freetype-loader.js, skipping asm.js patches");
     }
 
     /**
@@ -271,6 +244,9 @@ public class MiniGameBackend extends TeaBackend {
         // Filter out howler.js — WeChat uses wx.createInnerAudioContext() for audio,
         // not Howler.js. Saves ~35KB of I/O during engine subpackage loading.
         scripts.removeIf(path -> path.endsWith("howler.js"));
+
+        // Filter out backup files from freetype-teavm resources
+        scripts.removeIf(path -> path.endsWith(".asm.bak"));
 
         // Clean up template files that leaked into assets/ via propertiesResources
         FileHandle leakedTemplates = releasePath.child("assets/templates");
