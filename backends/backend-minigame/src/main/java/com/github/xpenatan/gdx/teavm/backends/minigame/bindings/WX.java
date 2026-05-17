@@ -152,7 +152,10 @@ public final class WX {
     @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readFileSync(path); } catch(e) { return null; }")
     public static native ArrayBuffer fsReadFileSync(JSObject fsm, String path);
 
-    @JSBody(params = {"fsm", "path"}, script = "try { return fsm.readFileSync(path, 'utf-8'); } catch(e) { return null; }")
+    @JSBody(params = {"fsm", "path"}, script =
+        "if(globalThis.__preloadedTextFiles&&globalThis.__preloadedTextFiles[path]){" +
+        "var v=globalThis.__preloadedTextFiles[path];delete globalThis.__preloadedTextFiles[path];return v;}" +
+        "try{return fsm.readFileSync(path,'utf-8');}catch(e){return null;}")
     public static native String fsReadFileSyncText(JSObject fsm, String path);
 
     @JSBody(params = {"fsm", "path", "data"}, script = "fsm.writeFileSync(path, data);")

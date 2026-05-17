@@ -268,6 +268,10 @@ public class MiniGameBackend extends TeaBackend {
         // via classpath scanning (TeaVMResourceProperties.getResources)
         scripts.removeIf(path -> path.contains("templates/minigame/"));
 
+        // Filter out howler.js — WeChat uses wx.createInnerAudioContext() for audio,
+        // not Howler.js. Saves ~35KB of I/O during engine subpackage loading.
+        scripts.removeIf(path -> path.endsWith("howler.js"));
+
         // Clean up template files that leaked into assets/ via propertiesResources
         FileHandle leakedTemplates = releasePath.child("assets/templates");
         if (leakedTemplates.exists()) {

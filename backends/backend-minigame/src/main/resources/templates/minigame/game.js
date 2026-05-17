@@ -50,41 +50,75 @@ function loadSubpackage(name) {
 
 async function startGame() {
     try {
-        // Phase 1: Load all subpackages in parallel
-        console.log('[game.js] Loading all subpackages in parallel...');
-        __perfMark('subpackages_start');
-        await Promise.all([
-            loadSubpackage('engine'),
-            loadSubpackage('assets'),
-            loadSubpackage('game')
-        ]);
-        __perfMark('subpackages_done');
-        __perfReport('phase1_subpackages', 'subpackages_start');
-        console.log('[game.js] All subpackages loaded');
-
-        // Phase 3: Wait for engine to initialize (Gdx bridge set by gdx.wasm.js)
-        console.log('[game.js] Waiting for engine initialization...');
-        __perfMark('engine_wait_start');
-        var gdxWaitStart = Date.now();
-        while (typeof window.Gdx === 'undefined') {
-            if (Date.now() - gdxWaitStart > 30000) {
-                throw new Error('Timed out waiting for Gdx to initialize (30s)');
+        // Phase 0: Install setter on window.Gdx so we get notified
+        // instantly when gdx.wasm.js sets it (via asyncCall).
+        // Must happen BEFORE loadSubpackage('engine') triggers require('./gdx.wasm.js').
+        var gdxReadyPromise = new Promise(function(resolve) {
+            if (typeof window.Gdx !== 'undefined') {
+                resolve();
+                return;
             }
-            await new Promise(function(r) { setTimeout(r, 50); });
-        }
-        __perfMark('engine_ready');
-        __perfReport('phase3_engine_wait', 'engine_wait_start');
-        console.log('[game.js] window.Gdx available, type:', typeof window.Gdx);
+            Object.defineProperty(window, 'Gdx', {
+                configurable: true,
+                set: function(val) {
+                    Object.defineProperty(window, 'Gdx', {
+                        configurable: true, writable: true, enumerable: true, value: val
+                    });
+                    resolve();
+                }
+            });
+        });
+
+        // Phase 1: Start all subpackage loads in parallel
+        __perfMark('subpackages_start');
+        var enginePromise = loadSubpackage('engine');
+        var assetsPromise = loadSubpackage('assets');
+        var gamePromise = loadSubpackage('game');
+
+        // Track engine subpackage resolution separately
+        var engineReadyPromise = enginePromise.then(function() {
+            __perfMark('engine_loaded');
+            __perfReport('phase1_engine', 'subpackages_start');
+        });
+
+        // Phase 2: Gdx fires via setter — no polling needed
+        var gdxPromise = gdxReadyPromise.then(function() {
+            __perfMark('gdx_ready');
+            __perfReport('phase3_engine_wait', 'engine_loaded');
+        });
+
+        // Phase 2.5: Pre-cache manifest files when assets resolve
+        // Reads preload.txt and rename-map.json during the I/O wait phase
+        // so Java's InternalStorage finds them in cache instead of reading from disk
+        var assetsReadyPromise = assetsPromise.then(function() {
+            __perfMark('assets_loaded');
+            __perfReport('phase1_assets', 'subpackages_start');
+            try {
+                var fsm = wx.getFileSystemManager();
+                globalThis.__preloadedTextFiles = {};
+                try { globalThis.__preloadedTextFiles['assets/preload.txt'] = fsm.readFileSync('assets/preload.txt', 'utf-8'); } catch(e) {}
+                try { globalThis.__preloadedTextFiles['assets/rename-map.json'] = fsm.readFileSync('assets/rename-map.json', 'utf-8'); } catch(e) {}
+            } catch(e) {}
+        });
+
+        // Track when game subpackage resolves
+        var gameReadyPromise = gamePromise.then(function() {
+            __perfMark('game_loaded');
+            __perfReport('phase1_game', 'subpackages_start');
+        });
+
+        // Wait for everything: Gdx ready + game loaded + assets ready (with pre-cached manifests)
+        await Promise.all([gdxPromise, gameReadyPromise, assetsReadyPromise]);
+        __perfMark('all_ready');
+        __perfReport('phase1_pipeline', 'subpackages_start');
 
         // Phase 5: Start the compiled game via globalThis bridge
         var mainModule = globalThis.__gameApp;
         if (mainModule && mainModule.main) {
-            console.log('[game.js] Calling main()...');
             __perfMark('main_call');
             mainModule.main([${mainClassArgs}]);
             __perfMark('main_returned');
             __perfReport('phase5_main', 'main_call');
-            console.log('[game.js] main() returned');
         } else {
             console.error('[game.js] ERROR: __gameApp not available, cannot call main()');
         }
@@ -98,8 +132,11 @@ async function startGame() {
             var m = __perf.marks;
             var safe = function(a, b) { return (m[a] !== undefined && m[b] !== undefined) ? (m[a] - m[b]) : 'N/A'; };
             console.log('[PERF] summary total_ms=' + safe('first_frame_complete', 'game_js_entry') +
-                ' subpackages_ms=' + safe('subpackages_done', 'subpackages_start') +
-                ' engine_wait_ms=' + safe('engine_ready', 'engine_wait_start') +
+                ' pipeline_ms=' + safe('all_ready', 'subpackages_start') +
+                ' engine_ms=' + safe('engine_loaded', 'subpackages_start') +
+                ' gdx_wait_ms=' + safe('gdx_ready', 'engine_loaded') +
+                ' game_ms=' + safe('game_loaded', 'subpackages_start') +
+                ' assets_ms=' + safe('assets_loaded', 'subpackages_start') +
                 ' main_ms=' + safe('main_returned', 'main_call'));
         })();
     } catch (err) {
