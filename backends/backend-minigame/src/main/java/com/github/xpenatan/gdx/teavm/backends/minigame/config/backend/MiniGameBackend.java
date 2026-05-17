@@ -94,7 +94,7 @@ public class MiniGameBackend extends TeaBackend {
             // the freetype Module object set by freetype.js via globalThis.Module
             FileHandle movedAppJs = gameFolder.child(targetFileName + ".js");
             String appContent = movedAppJs.readString();
-            String moduleDecl = "var Module=typeof globalThis!==\"undefined\"&&globalThis.Module?globalThis.Module:{};\n";
+            String moduleDecl = "var Module=globalThis.Module;\n";
             // Insert after the "use strict"; directive (first line)
             if (appContent.startsWith("\"use strict\";")) {
                 appContent = "\"use strict\";\n" + moduleDecl + appContent.substring("\"use strict\";\n".length());
@@ -199,10 +199,25 @@ public class MiniGameBackend extends TeaBackend {
         if (freetypeJs.exists()) {
             try {
                 String content = freetypeJs.readString();
+
+                // Patch 1: Make freetype.js use the shared globalThis.Module instead of
+                // creating its own empty {}. The adapter initializes globalThis.Module = {}
+                // before any subpackage loads, so freetype.js gets the shared object.
+                // Original: var Module=typeof Module!=="undefined"?Module:{};
+                // Patched:  var Module=globalThis.Module||{};
+                content = content.replace(
+                    "var Module=typeof Module!==\"undefined\"?Module:{};",
+                    "var Module=globalThis.Module||{};"
+                );
+
+                // Patch 2: Set globalThis.Module after FreeType functions are initialized.
+                // With the shared-Module approach, this is technically a no-op (Module IS
+                // globalThis.Module), but kept for robustness.
                 content = content.replace(
                     "Module[\"noExitRuntime\"]=true;",
                     "Module[\"noExitRuntime\"]=true;if(typeof globalThis!==\"undefined\"){globalThis.Module=Module}"
                 );
+
                 freetypeJs.writeString(content, false);
             } catch (Exception e) {
                 // Non-critical, continue
