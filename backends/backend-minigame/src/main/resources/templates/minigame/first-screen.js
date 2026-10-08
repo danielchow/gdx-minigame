@@ -8,7 +8,10 @@ var canvas = null;
 exports.start = function(c) {
     canvas = c;
     try {
-        GL = canvas.getContext('webgl');
+        // The first getContext() call fixes the canvas attributes; MiniGameGraphics later reuses
+        // this context. Keep them in sync with MiniGameApplicationConfiguration's defaults.
+        GL = canvas.getContext('webgl', {alpha: false, antialias: false, stencil: false,
+            premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance'});
         if (!GL) {
             console.log('[first-screen] WebGL not available, skipping splash');
             return;

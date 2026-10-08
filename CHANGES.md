@@ -2,6 +2,11 @@
 - Extract embedded JS/JSON string templates from MiniGameBackend.java into 8 external template files with `TemplateUtil` for `${var}` placeholder substitution
 - Add `.gitattributes` to enforce LF line endings for template resource files
 - Filter leaked template resource files from classpath scanning in `copyAssets()`
+- Fix WeChat iOS freezing or crashing while loading large textures: the void `memcpy` WASM import returned the whole heap, which WeChat's iOS bridge converts to a number on every call
+- Fix asset tasks running twice when `finishLoading()` polling and the queued timer both ran them; task failures (including `Error`s) now reach `AssetManager` through `get()`
+- Copy native pixmap pixels into the Java buffer only once it is requested, instead of the whole pixmap after every draw (e.g. the whole font atlas per glyph); fix buffer and native ownership after format conversion and on repeated `dispose()`
+- Create the splash WebGL context with the `MiniGameApplicationConfiguration` default attributes, since the game reuses it
+- Add `testRuntime` (part of `check`): Node regression tests against the real engine WASM
 
 [1.2.1]
 - Updated to libgdx 1.13.5

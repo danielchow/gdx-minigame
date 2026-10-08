@@ -245,9 +245,9 @@ find minigame/build/dist/minigame -path "*/templates/*" -type f
 
 ## Testing
 
-- **No automated test suite** for `backend-minigame` itself — the only test harness is the WeChat DevTools running the Solitaire test game
-- `backend-web` has one unit test (`MemoryFileStorageTest.java`) that may serve as a pattern
-- Always validate changes via the full Build-Publish-Test cycle below
+- `./gradlew :backends:backend-minigame:check` runs `testRuntime` (needs `node` on `PATH`). It compiles the probe programs in `src/test/java/.../regression/` through `MiniGameBackend`, then `src/test/js/*.test.mjs` runs them, and the bundled `gdx.wasm.js`, in Node against the real WASM. Coverage: void WASM imports return nothing, pixmap buffer copying/ownership, and asset tasks completing exactly once.
+- Node is not WeChat. Device-specific behavior still needs the Build-Publish-Test cycle below, including an iOS preview for anything touching the engine or loading.
+- When editing `gdx.wasm.js`, work on bytes: it is minified, contains CRLF line endings, and `.gitattributes` marks `*.js` as binary.
 
 ---
 

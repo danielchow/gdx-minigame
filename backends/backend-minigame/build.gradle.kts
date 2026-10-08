@@ -22,6 +22,37 @@ dependencies {
     implementation("com.github.xpenatan:jMultiplatform:${LibExt.jMultiplatform}")
 }
 
+val regressionProbes = layout.buildDirectory.dir("regression-probes")
+
+// src/test holds TeaVM probe programs, not JVM tests; testRuntime executes them.
+tasks.test {
+    failOnNoDiscoveredTests = false
+}
+
+tasks.register<JavaExec>("buildRegressionProbes") {
+    description = "Compile the src/test regression probes into Mini Game packages"
+    group = "verification"
+    mainClass.set("com.github.xpenatan.gdx.teavm.backends.minigame.regression.RegressionProbeBuilder")
+    // TeaVMResourceProperties only copies engine scripts out of JARs, so use the backend
+    // JAR, as a consuming game does, instead of the main class and resource directories.
+    classpath = files(tasks.jar) + sourceSets["test"].output +
+        (sourceSets["test"].runtimeClasspath - sourceSets["main"].output)
+    args(regressionProbes.get().asFile.absolutePath)
+}
+
+// Runs the bundled engine and the compiled probes in Node (node must be on PATH).
+tasks.register<Exec>("testRuntime") {
+    description = "Run engine, pixmap and asset-loading regression tests against the native WASM"
+    group = "verification"
+    dependsOn("buildRegressionProbes")
+    commandLine("node", "--test", "src/test/js/gdx-engine.test.mjs",
+        "src/test/js/pixmap-buffer.test.mjs", "src/test/js/async-completion.test.mjs")
+}
+
+tasks.named("check") {
+    dependsOn("testRuntime")
+}
+
 publishing {
     publications {
         create<MavenPublication>("maven") {

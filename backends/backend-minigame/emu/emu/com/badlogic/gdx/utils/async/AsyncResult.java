@@ -5,8 +5,10 @@ import org.teavm.jso.JSBody;
 import org.teavm.jso.browser.TimerHandler;
 
 public class AsyncResult<T> implements TimerHandler {
-    private AssetLoadingTask loadingTask;
+    private final AssetLoadingTask loadingTask;
+    private boolean started;
     private boolean isDone;
+    private Throwable failure;
     private int count;
 
     AsyncResult(AsyncTask<T> task) {
@@ -18,14 +20,19 @@ public class AsyncResult<T> implements TimerHandler {
     private static native void setTimeout(TimerHandler callback, int ms);
 
     public boolean isDone() {
-        count++;
-        if(count > 2) {
-            tick(); // If executed this block its possible that it was from finishLoading(). Javascript is async only.
+        // finishLoading() polls synchronously and cannot yield to the timer, so run the task
+        // inline on the third poll. Never run it again once it has started.
+        if(!isDone && ++count > 2) {
+            tick();
         }
         return isDone;
     }
 
     public T get() {
+        // AssetLoadingTask catches this and reports the failure through AssetManager.
+        if(failure != null) {
+            throw new RuntimeException(failure);
+        }
         return null;
     }
 
@@ -35,11 +42,17 @@ public class AsyncResult<T> implements TimerHandler {
     }
 
     private void tick() {
-        isDone = true;
+        // The timer stays queued when polling has already run the task inline.
+        if(started) {
+            return;
+        }
+        started = true;
         try {
             loadingTask.call();
-        } catch(Exception e) {
-            throw new RuntimeException(e);
+        } catch(Throwable e) {
+            failure = e;
+        } finally {
+            isDone = true;
         }
     }
 }

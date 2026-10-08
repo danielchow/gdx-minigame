@@ -25,6 +25,7 @@ public class Gdx2DPixmapNative implements Disposable {
 
     private Int32Array nativeData;
     private ByteBuffer buffer;
+    private boolean disposed;
 
     public Gdx2DPixmapNative(byte[] encodedData, int offset, int len, int requestedFormat) {
         long decodeStart = System.currentTimeMillis();
@@ -55,7 +56,7 @@ public class Gdx2DPixmapNative implements Disposable {
         this.format = nativeData.get(3);
         this.heapStartIndex = nativeData.get(4);
         this.heapEndIndex = nativeData.get(5);
-        copyHeapToBuffer();
+        // Keep pixels in the native heap until a caller actually asks for a buffer.
     }
 
     private void copyHeapToBuffer() {
@@ -68,7 +69,13 @@ public class Gdx2DPixmapNative implements Disposable {
         TypedArrays.copy(heapData, buffer);
     }
 
+    private void syncBufferIfPresent() {
+        if (buffer != null) copyHeapToBuffer();
+    }
+
     public void copyToHeap() {
+        // No caller can have changed Java pixels before the buffer was exposed.
+        if (buffer == null) return;
         // Need to update emscripten heap. TODO implement a way make all native calls use buffer and not emscripten heap
         Int8Array heapData = getHeapData(false);
         Int8Array typedArray = TypedArrays.getInt8Array(buffer);
@@ -87,26 +94,40 @@ public class Gdx2DPixmapNative implements Disposable {
         this.nativeData = pixmap.nativeData;
         this.heapStartIndex = pixmap.heapStartIndex;
         this.heapEndIndex = pixmap.heapEndIndex;
+        this.buffer = pixmap.buffer;
+        this.disposed = false;
+        // Transfer the allocation rather than leaving a second native owner.
+        pixmap.buffer = null;
+        pixmap.nativeData = null;
+        pixmap.basePtr = 0;
+        pixmap.heapStartIndex = 0;
+        pixmap.heapEndIndex = 0;
+        pixmap.disposed = true;
     }
 
     @Override
     public void dispose() {
+        if (disposed) return;
+        disposed = true;
         free(basePtr);
         if (buffer != null) {
             Buffers.free(buffer);
             buffer = null;
         }
         nativeData = null;
+        basePtr = 0;
+        heapStartIndex = 0;
+        heapEndIndex = 0;
     }
 
     public void clear(int color) {
         clear(basePtr, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void setPixel(int x, int y, int color) {
         setPixel(basePtr, x, y, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public int getPixel(int x, int y) {
@@ -115,55 +136,58 @@ public class Gdx2DPixmapNative implements Disposable {
 
     public void drawLine(int x, int y, int x2, int y2, int color) {
         drawLine(basePtr, x, y, x2, y2, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void drawRect(int x, int y, int width, int height, int color) {
         drawRect(basePtr, x, y, width, height, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void drawCircle(int x, int y, int radius, int color) {
         drawCircle(basePtr, x, y, radius, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void fillRect(int x, int y, int width, int height, int color) {
         fillRect(basePtr, x, y, width, height, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void fillCircle(int x, int y, int radius, int color) {
         fillCircle(basePtr, x, y, radius, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3, int color) {
         fillTriangle(basePtr, x1, y1, x2, y2, x3, y3, color);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void drawPixmap(int basePtr, int srcX, int srcY, int dstX, int dstY, int width, int height) {
         drawPixmap(basePtr, this.basePtr, srcX, srcY, width, height, dstX, dstY, width, height);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void drawPixmap(int basePtr, int srcX, int srcY, int srcWidth, int srcHeight, int dstX, int dstY, int dstWidth, int dstHeight) {
         drawPixmap(basePtr, this.basePtr, srcX, srcY, srcWidth, srcHeight, dstX, dstY, dstWidth, dstHeight);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void setBlend(int blend) {
         setBlend(basePtr, blend);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public void setScale(int scale) {
         setScale(basePtr, scale);
-        copyHeapToBuffer();
+        syncBufferIfPresent();
     }
 
     public ByteBuffer getBuffer() {
+        // Once returned, this buffer must remain current even if the caller keeps
+        // its reference instead of asking for it again after a drawing operation.
+        if (buffer == null && !disposed) copyHeapToBuffer();
         return buffer;
     }
 
