@@ -133,44 +133,65 @@ public class InternalStorage extends FileDB {
     }
 
     private void parseRenameMap(String json) {
-        // Minimal JSON object parser for {"key":"value", ...}
-        // Strip outer braces
-        json = json.trim();
-        if (!json.startsWith("{") || !json.endsWith("}")) return;
-        json = json.substring(1, json.length() - 1).trim();
-        if (json.isEmpty()) return;
+        parseRenameMap(json, renameMap);
+    }
 
-        int i = 0;
-        while (i < json.length()) {
-            // Find key
-            int keyStart = json.indexOf('"', i);
-            if (keyStart < 0) break;
-            int keyEnd = json.indexOf('"', keyStart + 1);
-            if (keyEnd < 0) break;
-            String key = json.substring(keyStart + 1, keyEnd);
-            // Normalize key (strip leading /)
-            key = normalize(key);
-
-            // Find colon
-            int colon = json.indexOf(':', keyEnd + 1);
-            if (colon < 0) break;
-
-            // Find value
-            int valStart = json.indexOf('"', colon + 1);
-            if (valStart < 0) break;
-            int valEnd = json.indexOf('"', valStart + 1);
-            if (valEnd < 0) break;
-            String value = json.substring(valStart + 1, valEnd);
-            // Normalize value (strip leading /)
-            value = normalize(value);
-
-            renameMap.put(key, value);
-
-            // Find comma or end
-            int comma = json.indexOf(',', valEnd + 1);
-            if (comma < 0) break;
-            i = comma + 1;
+    /**
+     * Minimal parser for the flat {"key": "value", ...} object MiniGameBackend writes,
+     * including its string escapes. Keys and values are normalized (no leading /).
+     */
+    public static void parseRenameMap(String json, Map<String, String> out) {
+        int[] pos = {0};
+        if (!skipTo(json, pos, '{')) return;
+        while (true) {
+            String key = readJsonString(json, pos);
+            if (key == null || !skipTo(json, pos, ':')) return;
+            String value = readJsonString(json, pos);
+            if (value == null) return;
+            out.put(normalize(key), normalize(value));
+            if (!skipTo(json, pos, ',')) return;
         }
+    }
+
+    /** Skips whitespace; consumes {@code expected} and returns true if it comes next. */
+    private static boolean skipTo(String json, int[] pos, char expected) {
+        int i = pos[0];
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        if (i >= json.length() || json.charAt(i) != expected) return false;
+        pos[0] = i + 1;
+        return true;
+    }
+
+    private static String readJsonString(String json, int[] pos) {
+        if (!skipTo(json, pos, '"')) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = pos[0]; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '"') {
+                pos[0] = i + 1;
+                return sb.toString();
+            }
+            if (c != '\\') {
+                sb.append(c);
+                continue;
+            }
+            if (++i >= json.length()) return null;
+            char e = json.charAt(i);
+            switch (e) {
+                case 'b': sb.append('\b'); break;
+                case 'f': sb.append('\f'); break;
+                case 'n': sb.append('\n'); break;
+                case 'r': sb.append('\r'); break;
+                case 't': sb.append('\t'); break;
+                case 'u':
+                    if (i + 4 >= json.length()) return null;
+                    sb.append((char) Integer.parseInt(json.substring(i + 1, i + 5), 16));
+                    i += 4;
+                    break;
+                default: sb.append(e); // \" \\ \/
+            }
+        }
+        return null;
     }
 
     // ── FileDB implementation ────────────────────────────────────────

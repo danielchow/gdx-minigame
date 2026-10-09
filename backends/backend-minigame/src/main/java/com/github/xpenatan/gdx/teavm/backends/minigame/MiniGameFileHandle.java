@@ -24,7 +24,6 @@ import java.io.Writer;
  */
 public class MiniGameFileHandle extends FileHandle {
     private final String file;
-    private final FileType type;
 
     private MiniGameFiles files;
 

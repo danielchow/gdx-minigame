@@ -16,6 +16,7 @@ public final class RegressionProbeBuilder {
         build(AsyncCompletionProbe.class, new File(outputRoot, "async-completion"));
         build(GLUploadRangeProbe.class, new File(outputRoot, "gl-upload-range"));
         build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"));
+        build(StorageAndAssetsProbe.class, new File(outputRoot, "storage-and-assets"));
     }
 
     private static void build(Class<?> probe, File output) {
