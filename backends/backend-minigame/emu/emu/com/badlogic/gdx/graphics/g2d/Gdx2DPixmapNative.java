@@ -25,11 +25,19 @@ public class Gdx2DPixmapNative implements Disposable {
 
     private Int32Array nativeData;
     private ByteBuffer buffer;
+    /** Native drawing happened after the last copy into {@link #buffer}. */
+    private boolean bufferStale;
     private boolean disposed;
 
-    public Gdx2DPixmapNative(byte[] encodedData, int offset, int len, int requestedFormat) {
+    /**
+     * @throws GdxRuntimeException if the image data could not be decoded.
+     */
+    public Gdx2DPixmapNative(byte[] encodedData, int offset, int len, int requestedFormat) throws GdxRuntimeException {
         long decodeStart = System.currentTimeMillis();
         nativeData = loadNative(encodedData, offset, len);
+        if(nativeData == null) {
+            throw new GdxRuntimeException("Couldn't load pixmap from image data");
+        }
         long decodeDur = System.currentTimeMillis() - decodeStart;
         decodeCount++;
         totalDecodeMs += decodeDur;
@@ -46,6 +54,9 @@ public class Gdx2DPixmapNative implements Disposable {
      */
     public Gdx2DPixmapNative(int width, int height, int format) throws GdxRuntimeException {
         nativeData = newPixmapNative(width, height, format);
+        if(nativeData == null) {
+            throw new GdxRuntimeException("Couldn't allocate pixmap " + width + "x" + height);
+        }
         updateNativeData();
     }
 
@@ -67,15 +78,23 @@ public class Gdx2DPixmapNative implements Disposable {
             buffer.order(ByteOrder.BIG_ENDIAN);
         }
         TypedArrays.copy(heapData, buffer);
+        bufferStale = false;
     }
 
-    private void syncBufferIfPresent() {
-        if (buffer != null) copyHeapToBuffer();
+    /**
+     * Native drawing leaves the Java buffer behind. Copying the whole pixmap here would cost a full font page
+     * (4 MiB for 1024x1024 RGBA) per glyph, so {@link #getBuffer()} copies on demand. A caller that keeps the
+     * buffer across drawing must call getBuffer() (Pixmap.getPixels()) again to see the new pixels.
+     */
+    private void markBufferStale() {
+        bufferStale = true;
     }
 
+    /** Copies Java buffer edits to the native pixmap. The buffer is the source of truth for this call. */
     public void copyToHeap() {
         // No caller can have changed Java pixels before the buffer was exposed.
         if (buffer == null) return;
+        bufferStale = false;
         // Need to update emscripten heap. TODO implement a way make all native calls use buffer and not emscripten heap
         Int8Array heapData = getHeapData(false);
         Int8Array typedArray = TypedArrays.getInt8Array(buffer);
@@ -122,12 +141,12 @@ public class Gdx2DPixmapNative implements Disposable {
 
     public void clear(int color) {
         clear(basePtr, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void setPixel(int x, int y, int color) {
         setPixel(basePtr, x, y, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public int getPixel(int x, int y) {
@@ -136,58 +155,54 @@ public class Gdx2DPixmapNative implements Disposable {
 
     public void drawLine(int x, int y, int x2, int y2, int color) {
         drawLine(basePtr, x, y, x2, y2, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void drawRect(int x, int y, int width, int height, int color) {
         drawRect(basePtr, x, y, width, height, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void drawCircle(int x, int y, int radius, int color) {
         drawCircle(basePtr, x, y, radius, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void fillRect(int x, int y, int width, int height, int color) {
         fillRect(basePtr, x, y, width, height, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void fillCircle(int x, int y, int radius, int color) {
         fillCircle(basePtr, x, y, radius, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3, int color) {
         fillTriangle(basePtr, x1, y1, x2, y2, x3, y3, color);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void drawPixmap(int basePtr, int srcX, int srcY, int dstX, int dstY, int width, int height) {
         drawPixmap(basePtr, this.basePtr, srcX, srcY, width, height, dstX, dstY, width, height);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void drawPixmap(int basePtr, int srcX, int srcY, int srcWidth, int srcHeight, int dstX, int dstY, int dstWidth, int dstHeight) {
         drawPixmap(basePtr, this.basePtr, srcX, srcY, srcWidth, srcHeight, dstX, dstY, dstWidth, dstHeight);
-        syncBufferIfPresent();
+        markBufferStale();
     }
 
     public void setBlend(int blend) {
         setBlend(basePtr, blend);
-        syncBufferIfPresent();
     }
 
     public void setScale(int scale) {
         setScale(basePtr, scale);
-        syncBufferIfPresent();
     }
 
     public ByteBuffer getBuffer() {
-        // Once returned, this buffer must remain current even if the caller keeps
-        // its reference instead of asking for it again after a drawing operation.
-        if (buffer == null && !disposed) copyHeapToBuffer();
+        if (!disposed && (buffer == null || bufferStale)) copyHeapToBuffer();
         return buffer;
     }
 
@@ -232,6 +247,9 @@ public class Gdx2DPixmapNative implements Disposable {
             "Gdx.writeArrayToMemory(buffer, cBuffer);" +
             "var pixmap = Gdx.Gdx.prototype.g2d_load(cBuffer, offset, len);" +
             "Gdx._free(cBuffer);" +
+            "if(pixmap === null || Gdx.getPointer(pixmap) === 0) {" +
+            "   return null;" +
+            "}" +
             "var pixels = Gdx.Gdx.prototype.g2d_get_pixels(pixmap);" +
             "var pixmapAddr = Gdx.getPointer(pixmap);" +
             "var format = pixmap.get_format();" +
@@ -271,6 +289,9 @@ public class Gdx2DPixmapNative implements Disposable {
 
     @JSBody(params = {"width", "height", "format"}, script = "" +
             "var pixmap = Gdx.Gdx.prototype.g2d_new(width, height, format);" +
+            "if(pixmap === null || Gdx.getPointer(pixmap) === 0) {" +
+            "   return null;" +
+            "}" +
             "var pixels = Gdx.Gdx.prototype.g2d_get_pixels(pixmap);" +
             "var pixmapAddr = Gdx.getPointer(pixmap);" +
             "var format = pixmap.get_format();" +

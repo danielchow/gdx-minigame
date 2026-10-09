@@ -7,7 +7,7 @@ import {loadEngine, typedArrays} from './engine.mjs';
 const packageUrl = new URL('../../../build/regression-probes/pixmap-buffer/minigame/', import.meta.url);
 const engineUrl = new URL('subpackages/engine/gdx.wasm.js', packageUrl);
 
-test('pixmaps defer atlas copies without breaking retained buffers or native ownership', {timeout: 15000}, async () => {
+test('pixmaps copy pixels to Java only on demand, keep native ownership and fail cleanly', {timeout: 15000}, async () => {
     const {gdx} = await loadEngine(engineUrl, readFileSync(new URL('gdx.wasm', engineUrl)));
     const stats = {atlasCopies: 0, frees: 0, complete: false};
     const originalSet = Int8Array.prototype.set;

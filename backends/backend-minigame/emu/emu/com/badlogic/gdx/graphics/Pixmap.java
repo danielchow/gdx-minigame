@@ -220,6 +220,8 @@ public class Pixmap implements Disposable, PixmapNativeInterface {
             throw new GdxRuntimeException("Couldn't setPixels from non-direct ByteBuffer");
         ByteBuffer buffer = nativePixmap.getBuffer();
         BufferUtils.copy(pixels, buffer, buffer.limit());
+        // Drawing, getPixel and uploads after this read the native pixmap.
+        getNative().copyToHeap();
     }
 
     public int getPixel(int x, int y) {
