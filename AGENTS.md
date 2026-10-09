@@ -170,7 +170,7 @@ build/dist/minigame/game.json        Final output with placeholder replaced
 | `game.json` | `game.json` | `generateGameJson()` | `${orientation}` |
 | `project.config.json` | `project.config.json` | `generateProjectConfigJson()` | `${description}`, `${appId}` |
 | `subpackage-engine.js` | `subpackages/engine/game.js` | `generateSubpackageEntryFiles()` | none |
-| `subpackage-game.js` | `subpackages/game/game.js` | `generateSubpackageEntryFiles()` | `${targetFileName}` ×3 |
+| `subpackage-game.js` | `subpackages/game/game.js` | `generateSubpackageEntryFiles()` | `${targetFileName}` ×2 |
 | `subpackage-assets.js` | `assets/game.js` | `generateSubpackageEntryFiles()` | none |
 
 ### Adding a new generated file

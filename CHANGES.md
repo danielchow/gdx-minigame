@@ -21,6 +21,12 @@
 - `setWindowedMode()` no longer resizes the full-screen canvas (it halved the resolution and drew the game 2x larger when a desktop-style display locked orientation); `supportsDisplayModeChange()` is false
 - Density and safe insets come from one cached `wx.getWindowInfo()` snapshot, refreshed on `wx.onWindowResize`, instead of 2-3 synchronous native calls (~112 us each on Android) per read
 - Platform detection uses WeChat's lowercase names (`UIUtils.isAndroid`/`isIos` were always false) and reads `wx.getDeviceInfo()` once instead of the deprecated `wx.getSystemInfoSync()`
+- Release runtime no longer logs progress and timing (`[PERF]` lines on every texture upload and image decode, startup progress in the JS templates); errors and warnings still report
+- Removed dead code: `WebApplication`, `WebApplicationConfiguration`, `MemoryFileStorage`, `ClasspathStorage`, `WebAgentInfo`, and no-op build steps
+- Pooled sound contexts use WeChat's WebAudio implementation and keep their loaded source between plays
+- `vibrate(ms)` and `vibrate(VibrationType)` map to WeChat's short/long and light/medium/heavy vibrations; `getTextInput` reports `canceled()`; `exit()` calls `wx.exitMiniProgram`; the asset loader's `preload`/`loadScript` listeners are called
+- `getDensity()` reports the device pixel ratio, as Android does (was 0.6x), and `getPpiX/Y()` 160x it
+- FreeType: the extension no longer puts `backend-web` (and its same-named emu classes) on mini game classpaths; `testRuntime` renders a real glyph through the bundled FreeType WASM
 
 [1.2.1]
 - Updated to libgdx 1.13.5
