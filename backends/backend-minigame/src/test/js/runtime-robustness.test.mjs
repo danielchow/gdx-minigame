@@ -206,3 +206,13 @@ test('a throwing render reports once, stops the loop and offers a restart', () =
     probe.modals[0].complete({confirm: true});
     assert.equal(probe.restarts.length, 1, 'confirming the dialog restarts the mini game');
 });
+
+test('the full-screen canvas cannot be resized through setWindowedMode', () => {
+    const probe = startProbe();
+    probe.runFrames();
+    const width = probe.command('graphicsWidth');
+    assert.equal(probe.command('supportsDisplayModeChange'), 0);
+    assert.equal(probe.command('setWindowedMode', Math.floor(width / 2)), 0, 'setWindowedMode reports no change');
+    probe.runFrames();
+    assert.equal(probe.command('graphicsWidth'), width, 'the canvas keeps its size');
+});

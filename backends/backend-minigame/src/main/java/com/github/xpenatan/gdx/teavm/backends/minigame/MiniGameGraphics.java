@@ -223,7 +223,7 @@ public class MiniGameGraphics implements Graphics {
     // === Display (WeChat is always fullscreen) ===
 
     @Override
-    public boolean supportsDisplayModeChange() { return true; }
+    public boolean supportsDisplayModeChange() { return false; }
 
     @Override
     public Monitor getPrimaryMonitor() {
@@ -259,9 +259,11 @@ public class MiniGameGraphics implements Graphics {
 
     @Override
     public boolean setWindowedMode(int width, int height) {
-        canvas.setWidth(width);
-        canvas.setHeight(height);
-        return true;
+        // The canvas is WeChat's full-screen surface: resizing it only lowers the resolution while
+        // WeChat still stretches it over the screen. libGT's DesktopDisplay.setOrientation() calls
+        // this (with a desktop HDPI factor of 2) when a win animation locks the orientation, which
+        // halved the canvas and drew the game twice as large.
+        return false;
     }
 
     // === Not applicable on WeChat ===

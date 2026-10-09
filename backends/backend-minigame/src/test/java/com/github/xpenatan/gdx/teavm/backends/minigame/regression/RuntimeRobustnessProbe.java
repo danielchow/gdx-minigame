@@ -83,6 +83,10 @@ public final class RuntimeRobustnessProbe {
                 case "musicPlaying": return music[arg].isPlaying() ? 1 : 0;
                 case "isTouched": return Gdx.input.isTouched() ? 1 : 0;
                 case "throwOnRender": throwOnRender = true; return 0;
+                // DesktopDisplay.setOrientation (libGT) resizes the "window" this way during win animations.
+                case "setWindowedMode": return Gdx.graphics.setWindowedMode(arg, arg * 2) ? 1 : 0;
+                case "supportsDisplayModeChange": return Gdx.graphics.supportsDisplayModeChange() ? 1 : 0;
+                case "graphicsWidth": return Gdx.graphics.getWidth();
                 default: throw new IllegalArgumentException(command);
             }
         });
