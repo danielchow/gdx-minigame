@@ -9,6 +9,7 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplicationConfig
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAudio;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAudio.MiniGameMusic;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAudio.MiniGameSound;
+import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameGraphics;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSFunctor;
 import org.teavm.jso.JSObject;
@@ -87,6 +88,24 @@ public final class RuntimeRobustnessProbe {
                 case "setWindowedMode": return Gdx.graphics.setWindowedMode(arg, arg * 2) ? 1 : 0;
                 case "supportsDisplayModeChange": return Gdx.graphics.supportsDisplayModeChange() ? 1 : 0;
                 case "graphicsWidth": return Gdx.graphics.getWidth();
+                case "readWindowMetrics": {
+                    int sum = 0;
+                    for (int i = 0; i < arg; i++) {
+                        sum += Gdx.graphics.getSafeInsetTop() + Gdx.graphics.getSafeInsetLeft()
+                            + Gdx.graphics.getSafeInsetBottom() + Gdx.graphics.getSafeInsetRight()
+                            + (int) Gdx.graphics.getDensity();
+                    }
+                    return sum;
+                }
+                case "safeInset": {
+                    switch (arg) {
+                        case 0: return Gdx.graphics.getSafeInsetTop();
+                        case 1: return Gdx.graphics.getSafeInsetLeft();
+                        case 2: return Gdx.graphics.getSafeInsetBottom();
+                        default: return Gdx.graphics.getSafeInsetRight();
+                    }
+                }
+                case "densityTimes100": return (int) Math.round(((MiniGameGraphics) Gdx.graphics).getNativeScreenDensity() * 100);
                 default: throw new IllegalArgumentException(command);
             }
         });

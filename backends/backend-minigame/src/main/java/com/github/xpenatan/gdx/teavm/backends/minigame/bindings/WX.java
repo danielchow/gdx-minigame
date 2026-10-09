@@ -20,6 +20,13 @@ public final class WX {
 
     // === System Info ===
 
+    /**
+     * One synchronous native call. Read it once and cache the values: the getters below make one
+     * such call each, which adds up when layout code reads them per widget.
+     */
+    @JSBody(script = "return wx.getWindowInfo();")
+    public static native WXWindowInfo getWindowInfo();
+
     @JSBody(script = "return wx.getWindowInfo().pixelRatio;")
     public static native double getPixelRatio();
 

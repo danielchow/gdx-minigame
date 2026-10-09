@@ -10,7 +10,9 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WXWindowInfo;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGL2RenderingContextExt;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLContextAttributesExt;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLRenderingContextExt;
@@ -45,6 +47,14 @@ public class MiniGameGraphics implements Graphics {
     float time = 0;
     int frames;
 
+    // wx.getWindowInfo() is a synchronous native call. Layout code reads density and safe insets
+    // per widget, so they are cached here and refreshed on wx.onWindowResize.
+    private double pixelRatio = 1;
+    private int safeInsetTop;
+    private int safeInsetLeft;
+    private int safeInsetBottom;
+    private int safeInsetRight;
+
     public MiniGameGraphics(MiniGameApplicationConfiguration config) {
         this.config = config;
         this.canvas = (HTMLCanvasElement) config.canvas;
@@ -52,7 +62,8 @@ public class MiniGameGraphics implements Graphics {
         // Scale canvas to physical pixels for proper viewport sizing
         // (wx.createCanvas() returns logical pixels, but game expects physical pixels
         //  like the web backend provides)
-        double pixelRatio = WX.getPixelRatio();
+        updateWindowMetrics();
+        WX.onWindowResize((LifecycleCallback) result -> updateWindowMetrics());
         if (pixelRatio > 1.0) {
             int w = (int)(canvas.getWidth() * pixelRatio);
             int h = (int)(canvas.getHeight() * pixelRatio);
@@ -217,7 +228,22 @@ public class MiniGameGraphics implements Graphics {
     }
 
     public double getNativeScreenDensity() {
-        return WX.getPixelRatio();
+        return pixelRatio;
+    }
+
+    /** Re-reads pixel ratio and safe area from one wx.getWindowInfo() call; insets in physical pixels. */
+    protected void updateWindowMetrics() {
+        WXWindowInfo info = WX.getWindowInfo();
+        pixelRatio = info.getPixelRatio();
+        WXWindowInfo.SafeArea safeArea = info.getSafeArea();
+        if (safeArea == null) {
+            safeInsetTop = safeInsetLeft = safeInsetBottom = safeInsetRight = 0;
+            return;
+        }
+        safeInsetTop = (int) (safeArea.getTop() * pixelRatio);
+        safeInsetLeft = (int) (safeArea.getLeft() * pixelRatio);
+        safeInsetBottom = (int) ((info.getScreenHeight() - safeArea.getBottom()) * pixelRatio);
+        safeInsetRight = (int) ((info.getScreenWidth() - safeArea.getRight()) * pixelRatio);
     }
 
     // === Display (WeChat is always fullscreen) ===
@@ -328,22 +354,22 @@ public class MiniGameGraphics implements Graphics {
 
     @Override
     public int getSafeInsetLeft() {
-        return (int)(WX.getSafeAreaLeft() * WX.getPixelRatio());
+        return safeInsetLeft;
     }
 
     @Override
     public int getSafeInsetTop() {
-        return (int)(WX.getSafeAreaTop() * WX.getPixelRatio());
+        return safeInsetTop;
     }
 
     @Override
     public int getSafeInsetBottom() {
-        return (int)(WX.getSafeAreaBottom() * WX.getPixelRatio());
+        return safeInsetBottom;
     }
 
     @Override
     public int getSafeInsetRight() {
-        return (int)(WX.getSafeAreaRight() * WX.getPixelRatio());
+        return safeInsetRight;
     }
 
     static class TeaMonitor extends Monitor {

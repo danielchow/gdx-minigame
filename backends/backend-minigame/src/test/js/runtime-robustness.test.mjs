@@ -43,8 +43,10 @@ function startProbe() {
     const on = name => listener => (listeners[name] ??= []).push(listener);
     const gl = noopProxy({getParameter: () => 'WebGL 1.0 (probe)', getExtension: () => null,
         getSupportedExtensions: () => []});
+    const windowInfo = {pixelRatio: 1, screenWidth: 100, screenHeight: 200, safeArea: null, calls: 0};
     const wx = noopProxy({
-        getWindowInfo: () => ({pixelRatio: 1, screenWidth: 100, screenHeight: 200, safeArea: null}),
+        getWindowInfo: () => {windowInfo.calls++; return {...windowInfo};},
+        onWindowResize: on('windowResize'),
         getDeviceInfo: () => ({platform: 'devtools'}),
         getFileSystemManager: () => noopProxy({readFileSync() {throw new Error('missing');}}),
         env: {USER_DATA_PATH: 'wxfile://usr'},
@@ -74,7 +76,7 @@ function startProbe() {
 
     const fire = (name, event) => {for (const listener of listeners[name] ?? []) listener(event);};
     return {
-        report, contexts, modals, restarts, listeners, fire,
+        report, contexts, modals, restarts, listeners, fire, windowInfo,
         command: (name, arg = 0) => report.command(name, arg),
         /** Runs every frame queued so far; returns how many ran. */
         runFrames() {
@@ -215,4 +217,20 @@ test('the full-screen canvas cannot be resized through setWindowedMode', () => {
     assert.equal(probe.command('setWindowedMode', Math.floor(width / 2)), 0, 'setWindowedMode reports no change');
     probe.runFrames();
     assert.equal(probe.command('graphicsWidth'), width, 'the canvas keeps its size');
+});
+
+test('density and safe insets are cached and refreshed on window resize', () => {
+    const probe = startProbe();
+    probe.runFrames();
+    const calls = probe.windowInfo.calls;
+    // Layout code reads these per widget; each read must not be a synchronous wx.getWindowInfo().
+    probe.command('readWindowMetrics', 500);
+    assert.equal(probe.windowInfo.calls, calls, 'repeated reads make no native calls');
+    assert.equal(probe.command('safeInset', 0), 0, 'no safe area means no insets');
+
+    Object.assign(probe.windowInfo, {pixelRatio: 3, safeArea: {top: 44, left: 0, bottom: 166, right: 100}});
+    probe.fire('windowResize', {});
+    assert.deepEqual([0, 1, 2, 3].map(side => probe.command('safeInset', side)), [132, 0, 102, 0],
+        'insets in physical pixels: top 44*3, left 0, bottom (200-166)*3, right 0');
+    assert.equal(probe.command('densityTimes100'), 300);
 });
