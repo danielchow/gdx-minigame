@@ -42,11 +42,10 @@ tasks.register<JavaExec>("buildRegressionProbes") {
 
 // Runs the bundled engine and the compiled probes in Node (node must be on PATH).
 tasks.register<Exec>("testRuntime") {
-    description = "Run engine, pixmap and asset-loading regression tests against the native WASM"
+    description = "Run the src/test/js Node regression tests against the real engine WASM"
     group = "verification"
     dependsOn("buildRegressionProbes")
-    commandLine("node", "--test", "src/test/js/gdx-engine.test.mjs",
-        "src/test/js/pixmap-buffer.test.mjs", "src/test/js/async-completion.test.mjs")
+    commandLine("node", "--test", "src/test/js/*.test.mjs")
 }
 
 tasks.named("check") {
