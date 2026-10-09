@@ -8,6 +8,10 @@
     "appid": "${appId}",
     "libVersion": "3.12.1",
     "packOptions": {
-        "ignore": []
+        "ignore": [
+            {"type": "folder", "value": "src"},
+            {"type": "suffix", "value": ".teavmdbg"},
+            {"type": "suffix", "value": ".js.map"}
+        ]
     }
 }

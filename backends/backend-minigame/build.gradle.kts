@@ -20,13 +20,30 @@ dependencies {
 
     implementation("com.badlogicgames.gdx:gdx:${LibExt.gdxVersion}")
     implementation("com.github.xpenatan:jMultiplatform:${LibExt.jMultiplatform}")
+
+    testImplementation("junit:junit:4.13.2")
 }
 
 val regressionProbes = layout.buildDirectory.dir("regression-probes")
 
-// src/test holds TeaVM probe programs, not JVM tests; testRuntime executes them.
+// Files a previous build of the pixmap-buffer probe could have left behind. The probe
+// build must delete all of them except the DevTools private config; BuildOutputTest checks.
+val staleProbeOutput = mapOf(
+    "game.json" to "{\"stale\": true}",
+    "project.private.config.json" to "{\"planted\": true}",
+    "app.js.map" to "stale",
+    "app.js.teavmdbg" to "stale",
+    "src/com/example/Stale.java" to "stale",
+    "assets/removed-asset.png" to "stale",
+    "assets/rename-map.json" to "{\"/old.bin\": \"/old.bin.txt\"}",
+)
+
+// src/test also holds TeaVM probe programs; testRuntime executes those, while JUnit
+// tests inspect the probe build output.
 tasks.test {
     failOnNoDiscoveredTests = false
+    dependsOn("buildRegressionProbes")
+    systemProperty("regressionProbes", regressionProbes.get().asFile.absolutePath)
 }
 
 tasks.register<JavaExec>("buildRegressionProbes") {
@@ -38,6 +55,12 @@ tasks.register<JavaExec>("buildRegressionProbes") {
     classpath = files(tasks.jar) + sourceSets["test"].output +
         (sourceSets["test"].runtimeClasspath - sourceSets["main"].output)
     args(regressionProbes.get().asFile.absolutePath)
+    doFirst {
+        val previousBuild = regressionProbes.get().dir("pixmap-buffer/minigame").asFile
+        staleProbeOutput.forEach { (path, content) ->
+            previousBuild.resolve(path).apply { parentFile.mkdirs() }.writeText(content)
+        }
+    }
 }
 
 // Runs the bundled engine and the compiled probes in Node (node must be on PATH).

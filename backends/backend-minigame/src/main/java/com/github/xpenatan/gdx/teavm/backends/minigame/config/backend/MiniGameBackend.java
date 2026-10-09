@@ -7,11 +7,18 @@ import com.github.xpenatan.gdx.teavm.backends.shared.config.AssetsCopy;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.compiler.TeaBackend;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.compiler.TeaCompilerData;
 import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Stream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.teavm.tooling.TeaVMTargetType;
@@ -22,6 +29,12 @@ import org.teavm.tooling.TeaVMTargetType;
  * with a subpackages/ directory layout for parallel loading.
  */
 public class MiniGameBackend extends TeaBackend {
+
+    /** WeChat DevTools keeps the developer's local settings here; cleaning must keep it. */
+    static final String PRIVATE_CONFIG_FILE = "project.private.config.json";
+
+    private static final Pattern WASM_DATA_URI =
+        Pattern.compile("(\"data:application/octet-stream;base64,)([A-Za-z0-9+/=]+)(\")");
 
     public String appId = "";
     public String orientation = "portrait";
@@ -70,6 +83,10 @@ public class MiniGameBackend extends TeaBackend {
         } else {
             releasePath = new FileHandle(new File(data.output, "minigame").getAbsolutePath().replace("\\", "/"));
         }
+        // setup() runs before TeaVM compiles and before copyAssets(), so nothing of this
+        // build exists yet. Without this, debug output (app.js.map, *.teavmdbg, src/),
+        // removed assets and stale rename-map entries from earlier builds would ship.
+        cleanReleaseDirectory(releasePath.file());
         tool.setTargetDirectory(releasePath.file());
         setupMinigame(data);
     }
@@ -103,6 +120,38 @@ public class MiniGameBackend extends TeaBackend {
             }
             movedAppJs.writeString(appContent, false);
             System.out.println("[MiniGameBackend] Inserted Module declaration into " + targetFileName + ".js");
+        }
+    }
+
+    /**
+     * Delete everything in the release directory except {@link #PRIVATE_CONFIG_FILE}.
+     * Refuses a non-empty directory that holds no game.json or project.config.json, since
+     * that is not a previous Mini Game build and its files may not be ours to delete.
+     */
+    static void cleanReleaseDirectory(File dir) {
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        boolean hasOtherFiles = Arrays.stream(children)
+            .anyMatch(child -> !child.getName().startsWith(".") && !child.getName().equals(PRIVATE_CONFIG_FILE));
+        boolean previousBuild = new File(dir, "game.json").exists() || new File(dir, "project.config.json").exists();
+        if (hasOtherFiles && !previousBuild) {
+            throw new IllegalStateException("Refusing to clean release directory " + dir.getAbsolutePath()
+                + ": it is not empty and has no game.json or project.config.json from a previous Mini Game build");
+        }
+        for (File child : children) {
+            if (child.getName().equals(PRIVATE_CONFIG_FILE)) continue;
+            deleteRecursively(child.toPath());
+        }
+    }
+
+    /** Deletes without following symbolic links, so a linked folder's contents survive. */
+    private static void deleteRecursively(Path path) {
+        try (Stream<Path> walk = Files.walk(path)) {
+            for (Path p : (Iterable<Path>) walk.sorted(Comparator.reverseOrder())::iterator) {
+                Files.delete(p);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Couldn't clean " + path + " from the release directory", e);
         }
     }
 
@@ -206,31 +255,37 @@ public class MiniGameBackend extends TeaBackend {
      * so WXWebAssembly.instantiate('subpackages/engine/gdx.wasm', imports) can find it.
      */
     private void extractWasmFromJs() {
-        // gdx.wasm.js lives in subpackages/engine/
-        FileHandle wasmJs = releasePath.child("subpackages/engine/gdx.wasm.js");
-        if (!wasmJs.exists()) {
-            System.out.println("[MiniGameBackend] WARNING: gdx.wasm.js not found, skipping WASM extraction");
-            return;
-        }
+        FileHandle engineFolder = releasePath.child("subpackages/engine");
+        byte[] wasmBytes = extractWasm(engineFolder.child("gdx.wasm.js"));
+        // Write the .wasm binary to subpackages/engine/ (WXWebAssembly reads from filesystem)
+        engineFolder.child("gdx.wasm").writeBytes(wasmBytes, false);
+        System.out.println("[MiniGameBackend] Extracted gdx.wasm (" + wasmBytes.length + " bytes) from gdx.wasm.js");
+    }
+
+    /** Decodes the WASM embedded in gdx.wasm.js; without it the package cannot start, so this fails the build. */
+    static byte[] extractWasm(FileHandle wasmJs) {
+        Matcher matcher = findWasmDataUri(wasmJs, readWasmJs(wasmJs));
         try {
-            String content = wasmJs.readString();
-            Pattern pattern = Pattern.compile("\"data:application/octet-stream;base64,([A-Za-z0-9+/=]+)\"");
-            Matcher matcher = pattern.matcher(content);
-            if (!matcher.find()) {
-                System.out.println("[MiniGameBackend] WARNING: Could not find base64 WASM data in gdx.wasm.js");
-                return;
-            }
-            String base64Data = matcher.group(1);
-            byte[] wasmBytes = Base64.getDecoder().decode(base64Data);
-            // Write the .wasm binary to subpackages/engine/ (WXWebAssembly reads from filesystem)
-            FileHandle engineFolder = releasePath.child("subpackages/engine");
-            FileHandle wasmFile = engineFolder.child("gdx.wasm");
-            wasmFile.writeBytes(wasmBytes, false);
-            System.out.println("[MiniGameBackend] Extracted gdx.wasm (" + wasmBytes.length + " bytes) from gdx.wasm.js");
-        } catch (Exception e) {
-            System.out.println("[MiniGameBackend] ERROR: Failed to extract WASM from gdx.wasm.js: " + e.getMessage());
-            e.printStackTrace();
+            return Base64.getDecoder().decode(matcher.group(2));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Invalid base64 WASM data URI in " + wasmJs.path(), e);
         }
+    }
+
+    private static String readWasmJs(FileHandle wasmJs) {
+        if (!wasmJs.exists()) {
+            throw new IllegalStateException("Engine script not found: " + wasmJs.path()
+                + " (the backend JAR must provide gdx.wasm.js)");
+        }
+        return wasmJs.readString("UTF-8");
+    }
+
+    private static Matcher findWasmDataUri(FileHandle wasmJs, String content) {
+        Matcher matcher = WASM_DATA_URI.matcher(content);
+        if (!matcher.find()) {
+            throw new IllegalStateException("No base64 WASM data URI found in " + wasmJs.path());
+        }
+        return matcher;
     }
 
     @Override
@@ -317,28 +372,17 @@ public class MiniGameBackend extends TeaBackend {
      */
     private void replaceWasmDataUriWithDummy() {
         FileHandle wasmJs = releasePath.child("subpackages/engine/gdx.wasm.js");
-        if (!wasmJs.exists()) {
-            return;
-        }
-        try {
-            String content = wasmJs.readString();
-            // Match the full data URI including the base64 payload, keeping prefix and suffix via capture groups
-            Pattern pattern = Pattern.compile("(\"data:application/octet-stream;base64,)[A-Za-z0-9+/=]+(\")");
-            Matcher matcher = pattern.matcher(content);
-            if (!matcher.find()) {
-                System.out.println("[MiniGameBackend] WARNING: Could not find base64 WASM data URI in gdx.wasm.js");
-                return;
-            }
-            int originalSize = content.length();
-            String replacement = matcher.group(1) + "AA==" + matcher.group(2);
-            String modified = matcher.replaceFirst(replacement);
-            wasmJs.writeString(modified, false);
-            int saved = originalSize - modified.length();
-            System.out.println("[MiniGameBackend] Replaced WASM data URI with 1-byte dummy (saved ~" + (saved / 1024) + "KB)");
-        } catch (Exception e) {
-            System.out.println("[MiniGameBackend] ERROR: Failed to replace WASM data URI: " + e.getMessage());
-            e.printStackTrace();
-        }
+        int saved = replaceWasmDataUriWithDummy(wasmJs);
+        System.out.println("[MiniGameBackend] Replaced WASM data URI with 1-byte dummy (saved ~" + (saved / 1024) + "KB)");
+    }
+
+    /** Returns the number of characters saved. */
+    static int replaceWasmDataUriWithDummy(FileHandle wasmJs) {
+        String content = readWasmJs(wasmJs);
+        Matcher matcher = findWasmDataUri(wasmJs, content);
+        String modified = content.substring(0, matcher.start(2)) + "AA==" + content.substring(matcher.end(2));
+        wasmJs.writeString(modified, false, "UTF-8");
+        return content.length() - modified.length();
     }
 
     /**
@@ -346,6 +390,12 @@ public class MiniGameBackend extends TeaBackend {
      * Appends .txt to blocked extensions and generates a rename-map.json for runtime lookup.
      */
     private void renameBlockedExtensions() {
+        int count = renameBlockedExtensions(releasePath.child("assets"));
+        System.out.println("[MiniGameBackend] Generated rename-map.json with " + count + " entries");
+    }
+
+    /** Returns the number of renamed files. */
+    static int renameBlockedExtensions(FileHandle assetsDir) {
         Set<String> allowedExts = new HashSet<>(Arrays.asList(
             // WeChat Mini Game official whitelist (69 extensions)
             // Source: https://developers.weixin.qq.com/minigame/dev/guide/base-ability/code-package.html
@@ -357,31 +407,51 @@ public class MiniGameBackend extends TeaBackend {
             "aac", "astc", "br", "csv", "cur", "dat", "dds", "glb", "gltf", "ico",
             "ktx", "lmani", "lml", "pkm", "prefab", "scene", "skel", "wasm", "xml"
         ));
-        FileHandle assetsDir = releasePath.child("assets");
-        if (!assetsDir.exists()) return;
+        assetsDir.mkdirs();
 
-        // Build rename map
-        StringBuilder json = new StringBuilder("{\n");
-        int[] count = {0};
-        renameFilesRecursive(assetsDir, assetsDir, allowedExts, json, count);
-
-        if (count[0] > 0) {
-            // Remove trailing comma
-            int lastComma = json.lastIndexOf(",");
-            if (lastComma > 0) json.deleteCharAt(lastComma);
-            json.append("}\n");
-            FileHandle mapFile = assetsDir.child("rename-map.json");
-            mapFile.writeString(json.toString(), false);
-            System.out.println("[MiniGameBackend] Generated rename-map.json with " + count[0] + " entries");
-        }
+        // Always written, even empty, so the runtime never sees a map from an older build
+        Map<String, String> renames = new TreeMap<>();
+        renameFilesRecursive(assetsDir, assetsDir, allowedExts, renames);
+        assetsDir.child("rename-map.json").writeString(toJsonObject(renames), false, "UTF-8");
+        return renames.size();
     }
 
-    private void renameFilesRecursive(FileHandle dir, FileHandle root, Set<String> allowedExts, StringBuilder json, int[] count) {
+    /** Writes a flat JSON object of strings; InternalStorage.parseRenameMap reads it back. */
+    static String toJsonObject(Map<String, String> map) {
+        if (map.isEmpty()) return "{}\n";
+        StringBuilder json = new StringBuilder("{\n");
+        int i = 0;
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            json.append("  ");
+            appendJsonString(json, entry.getKey());
+            json.append(": ");
+            appendJsonString(json, entry.getValue());
+            json.append(++i < map.size() ? ",\n" : "\n");
+        }
+        return json.append("}\n").toString();
+    }
+
+    private static void appendJsonString(StringBuilder json, String value) {
+        json.append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '"' || c == '\\') {
+                json.append('\\').append(c);
+            } else if (c < 0x20) {
+                json.append(String.format("\\u%04x", (int) c));
+            } else {
+                json.append(c);
+            }
+        }
+        json.append('"');
+    }
+
+    private static void renameFilesRecursive(FileHandle dir, FileHandle root, Set<String> allowedExts, Map<String, String> renames) {
         FileHandle[] children = dir.list();
         if (children == null) return;
         for (FileHandle child : children) {
             if (child.isDirectory()) {
-                renameFilesRecursive(child, root, allowedExts, json, count);
+                renameFilesRecursive(child, root, allowedExts, renames);
             } else {
                 String name = child.name();
                 // Skip metadata files and dotfiles
@@ -395,8 +465,7 @@ public class MiniGameBackend extends TeaBackend {
                     if (renamed.exists()) renamed.delete();
                     child.moveTo(renamed);
                     String renamedRelative = renamed.path().substring(root.path().length() + 1).replace('\\', '/');
-                    json.append("  \"/").append(relativePath).append("\": \"/").append(renamedRelative).append("\",\n");
-                    count[0]++;
+                    renames.put("/" + relativePath, "/" + renamedRelative);
                 }
             }
         }
