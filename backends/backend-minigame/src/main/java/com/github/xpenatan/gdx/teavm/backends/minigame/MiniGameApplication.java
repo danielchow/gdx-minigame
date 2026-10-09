@@ -17,6 +17,7 @@ import com.badlogic.gdx.utils.ObjectMap;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.OnHideCallback;
+import com.github.xpenatan.gdx.teavm.backends.minigame.dom.MiniGameNavigator;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.jmultiplatform.core.JMultiplatform;
 import com.github.xpenatan.jmultiplatform.core.JPlatformMap;
@@ -87,15 +88,16 @@ public class MiniGameApplication implements Application {
         updateErrorStack();
 
         // Set system properties
-        String platform = WX.getPlatform();
+        String platform = MiniGameNavigator.getPlatform();
         System.setProperty("java.runtime.name", "");
         System.setProperty("userAgent", "WeChat Mini Game");
-        if (platform.contains("Windows")) System.setProperty("os.name", "Windows");
-        else if (platform.contains("Mac")) System.setProperty("os.name", "OS X");
-        else if (platform.contains("Linux")) System.setProperty("os.name", "Linux");
-        else if (platform.contains("Android") || platform.contains("android")) System.setProperty("os.name", "Linux");
-        else if (platform.contains("iOS") || platform.contains("devtools")) System.setProperty("os.name", "OS X");
-        else System.setProperty("os.name", "Unknown");
+        // libGDX's SharedLibraryLoader conventions: Android reports Linux, iOS reports OS X.
+        switch (platform) {
+            case "windows": System.setProperty("os.name", "Windows"); break;
+            case "mac": case "ios": case "devtools": System.setProperty("os.name", "OS X"); break;
+            case "android": case "ohos": System.setProperty("os.name", "Linux"); break;
+            default: System.setProperty("os.name", "Unknown");
+        }
 
         JMultiplatform instance = JMultiplatform.getInstance();
         JPlatformMap map = instance.getMap();

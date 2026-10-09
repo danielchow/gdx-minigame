@@ -7,12 +7,12 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.dom.MiniGameNavigator;
 
 public class UIUtils {
 
-    static public boolean isAndroid = MiniGameNavigator.getPlatform().contains("Android");
-    static public boolean isMac = MiniGameNavigator.getPlatform().contains("Mac");
-    static public boolean isWindows = MiniGameNavigator.getPlatform().contains("Win");
-    static public boolean isLinux = MiniGameNavigator.getPlatform().contains("Linux") || MiniGameNavigator.getPlatform().contains("FreeBSD");
-    static public boolean isIos = MiniGameNavigator.getPlatform().contains("iPhone") || MiniGameNavigator.getPlatform().contains("iPod")
-            || MiniGameNavigator.getPlatform().contains("iPad");
+    // WeChat reports lowercase platform names, not browser user agents.
+    static public boolean isAndroid = MiniGameNavigator.getPlatform().equals("android");
+    static public boolean isMac = MiniGameNavigator.getPlatform().equals("mac");
+    static public boolean isWindows = MiniGameNavigator.getPlatform().equals("windows");
+    static public boolean isLinux = false;
+    static public boolean isIos = MiniGameNavigator.getPlatform().equals("ios");
 
     static public boolean left() {
         return Gdx.input.isButtonPressed(Buttons.LEFT);

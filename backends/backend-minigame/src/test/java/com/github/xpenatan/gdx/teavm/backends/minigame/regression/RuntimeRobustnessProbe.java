@@ -105,6 +105,13 @@ public final class RuntimeRobustnessProbe {
                         default: return Gdx.graphics.getSafeInsetRight();
                     }
                 }
+                case "uiutils": {
+                    switch (arg) {
+                        case 0: return com.badlogic.gdx.scenes.scene2d.utils.UIUtils.isAndroid ? 1 : 0;
+                        case 1: return com.badlogic.gdx.scenes.scene2d.utils.UIUtils.isIos ? 1 : 0;
+                        default: return "OS X".equals(System.getProperty("os.name")) ? 1 : 0;
+                    }
+                }
                 case "densityTimes100": return (int) Math.round(((MiniGameGraphics) Gdx.graphics).getNativeScreenDensity() * 100);
                 default: throw new IllegalArgumentException(command);
             }

@@ -33,7 +33,7 @@ function noopProxy(values = {}) {
     return new Proxy(values, {get: (target, key) => key in target ? target[key] : () => null});
 }
 
-function startProbe() {
+function startProbe(platform = 'devtools') {
     const frames = [];
     const listeners = {};
     const contexts = [];
@@ -47,7 +47,8 @@ function startProbe() {
     const wx = noopProxy({
         getWindowInfo: () => {windowInfo.calls++; return {...windowInfo};},
         onWindowResize: on('windowResize'),
-        getDeviceInfo: () => ({platform: 'devtools'}),
+        getDeviceInfo: () => ({platform}),
+        getSystemInfoSync: () => ({platform, pixelRatio: 1}),
         getFileSystemManager: () => noopProxy({readFileSync() {throw new Error('missing');}}),
         env: {USER_DATA_PATH: 'wxfile://usr'},
         getStorageSync: () => '',
@@ -234,3 +235,13 @@ test('density and safe insets are cached and refreshed on window resize', () => 
         'insets in physical pixels: top 44*3, left 0, bottom (200-166)*3, right 0');
     assert.equal(probe.command('densityTimes100'), 300);
 });
+
+test('platform flags follow WeChat\'s lowercase platform names', () => {
+    const flags = probe => ({android: probe.command('uiutils', 0), ios: probe.command('uiutils', 1),
+        osX: probe.command('uiutils', 2)});
+    const android = startProbe('android');
+    assert.deepEqual(flags(android), {android: 1, ios: 0, osX: 0});
+    const ios = startProbe('ios');
+    assert.deepEqual(flags(ios), {android: 0, ios: 1, osX: 1});
+});
+
