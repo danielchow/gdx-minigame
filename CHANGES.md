@@ -18,6 +18,9 @@
 - Preferences: `flush()` writes only changed keys; a key's type can change without leaving the old typed key; mismatched getters parse or return the default instead of throwing `ClassCastException`
 - Asset loader/downloader listeners are called; `AssetManager` throws "Couldn't load file" for a missing file instead of loading forever
 - `MiniGameFileHandle` no longer shadows `FileHandle.type`, which broke `hashCode()`/`equals()`
+- `setWindowedMode()` no longer resizes the full-screen canvas (it halved the resolution and drew the game 2x larger when a desktop-style display locked orientation); `supportsDisplayModeChange()` is false
+- Density and safe insets come from one cached `wx.getWindowInfo()` snapshot, refreshed on `wx.onWindowResize`, instead of 2-3 synchronous native calls (~112 us each on Android) per read
+- Platform detection uses WeChat's lowercase names (`UIUtils.isAndroid`/`isIos` were always false) and reads `wx.getDeviceInfo()` once instead of the deprecated `wx.getSystemInfoSync()`
 
 [1.2.1]
 - Updated to libgdx 1.13.5
