@@ -15,7 +15,6 @@ import emu.com.badlogic.gdx.utils.async.AsyncExecutor;
 import emu.com.badlogic.gdx.utils.async.AsyncResult;
 import emu.com.badlogic.gdx.utils.async.AsyncTask;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
-import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetType;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetLoader;
 
 public class AssetLoadingTask implements AsyncTask<Void> {
@@ -33,8 +32,6 @@ public class AssetLoadingTask implements AsyncTask<Void> {
     volatile Object asset;
 
     volatile boolean cancel;
-
-    int count = 0;
 
     public AssetLoadingTask(AssetManager manager, AssetDescriptor assetDesc, com.badlogic.gdx.assets.loaders.AssetLoader loader, AsyncExecutor threadPool) {
         this.manager = manager;
@@ -76,16 +73,10 @@ public class AssetLoadingTask implements AsyncTask<Void> {
         String path = fileHandle.path();
         Files.FileType type = fileHandle.type();
         if(!fileHandle.extension().isEmpty() && !assetLoader.isAssetLoaded(type, path)) {
-            // Only try to download if contains extension and is not in queue or downloading.
-            if(!assetLoader.isAssetInQueueOrDownloading(path)) {
-                count++;
-                if(count == 2) {
-                    cancel = true;
-                }
-                else {
-                    assetLoader.loadAsset(path, AssetType.Binary, type, null);
-                }
-            }
+            // Mini Games have no runtime downloads, so a file missing from the package has
+            // failed. Throw like LWJGL3/GWT (and upstream c11a0cd4c) instead of polling forever.
+            cancel = true;
+            throw new GdxRuntimeException("Couldn't load file: " + path);
         }
         else {
             if(loader instanceof SynchronousAssetLoader)

@@ -6,19 +6,19 @@ import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetType;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.WebBlob;
 
 /**
- * Minimal AssetDownloader for WeChat Mini Game.
- * All methods are no-ops because assets are preloaded synchronously at startup.
- * This prevents NPE in Pixmap.downloadFromUrl() if it is called.
+ * AssetDownloader for WeChat Mini Game, which has no runtime downloads: every asset ships
+ * in the package and is read from it on demand. Each request reports failure to its
+ * listener, so a caller such as Pixmap.downloadFromUrl() gets an answer instead of waiting.
  */
 public class MiniGameAssetDownloader implements AssetDownloader {
 
     @Override
     public void load(boolean async, String url, AssetType type, AssetLoaderListener<WebBlob> listener) {
-        // No-op: no runtime downloading on WeChat Mini Game
+        if (listener != null) listener.onFailure(url);
     }
 
     @Override
     public void loadScript(boolean async, String url, AssetLoaderListener<String> listener) {
-        // No-op: no runtime script downloading on WeChat Mini Game
+        if (listener != null) listener.onFailure(url);
     }
 }
