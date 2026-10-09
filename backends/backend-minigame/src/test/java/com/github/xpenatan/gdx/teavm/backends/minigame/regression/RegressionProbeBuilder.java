@@ -14,6 +14,7 @@ public final class RegressionProbeBuilder {
         File outputRoot = new File(args[0]);
         build(PixmapBufferProbe.class, new File(outputRoot, "pixmap-buffer"));
         build(AsyncCompletionProbe.class, new File(outputRoot, "async-completion"));
+        build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"));
     }
 
     private static void build(Class<?> probe, File output) {
