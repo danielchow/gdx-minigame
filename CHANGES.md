@@ -27,6 +27,7 @@
 - `vibrate(ms)` and `vibrate(VibrationType)` map to WeChat's short/long and light/medium/heavy vibrations; `getTextInput` reports `canceled()`; `exit()` calls `wx.exitMiniProgram`; the asset loader's `preload`/`loadScript` listeners are called
 - `getDensity()` reports the device pixel ratio, as Android does (was 0.6x), and `getPpiX/Y()` 160x it
 - FreeType: the extension no longer puts `backend-web` (and its same-named emu classes) on mini game classpaths; `testRuntime` renders a real glyph through the bundled FreeType WASM
+- Add `MiniGameShare`: share cards (`wx.shareAppMessage`), the friends-only 转发 menu with a placeholder card and late replies (`{promise}`), launch/`onShow` query delivery, and native PNG encoding of RGBA pixels through an offscreen canvas
 
 [1.2.1]
 - Updated to libgdx 1.13.5

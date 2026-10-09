@@ -18,6 +18,7 @@ public final class RegressionProbeBuilder {
         build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"));
         build(StorageAndAssetsProbe.class, new File(outputRoot, "storage-and-assets"));
         build(FreeTypeGlyphProbe.class, new File(outputRoot, "freetype-glyph"));
+        build(ShareProbe.class, new File(outputRoot, "share"));
     }
 
     private static void build(Class<?> probe, File output) {

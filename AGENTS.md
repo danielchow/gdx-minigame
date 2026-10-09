@@ -116,6 +116,7 @@ The repo also contains `extensions/` (asset-loader, freetype, controllers) and `
 1. **Find the equivalent** in `backends/backend-web/` — study how the web backend implements the LibGDX interface
 2. **Read the WeChat API doc** in `references/wx-api-docs/<category>/` to understand what `wx.*` calls are available
 3. **Add the binding** in `bindings/` — create a Java wrapper using TeaVM's `@JSBody` / JS interop to call the `wx.*` API
+   - TeaVM renames `@JSBody` parameters to one or two letters (`b`, `c`, `d`, …) in release builds. A script's own locals and inner function names must be long and descriptive: a local `var c` silently replaces the second parameter. Test the binding against the compiled probe output (`testRuntime`), not only in DevTools debug builds.
 4. **Wire it up** in the corresponding `MiniGame*.java` class (e.g., `MiniGameAudio.java` for audio APIs)
 5. **Build and test** using the Build-Publish-Test cycle below
 
