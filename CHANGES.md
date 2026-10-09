@@ -7,6 +7,17 @@
 - Copy native pixmap pixels into the Java buffer only once it is requested, instead of the whole pixmap after every draw (e.g. the whole font atlas per glyph); fix buffer and native ownership after format conversion and on repeated `dispose()`
 - Create the splash WebGL context with the `MiniGameApplicationConfiguration` default attributes, since the game reuses it
 - Add `testRuntime` (part of `check`): Node regression tests against the real engine WASM
+- Upload only the elements a GL call is given: every SpriteBatch flush uploaded the whole vertex buffer (80 KB for 1000 sprites), and uniform/attribute calls ignored offset, position and count
+- Copy pixmap pixels to Java only when requested, not the whole pixmap after each draw of an uploaded pixmap (a 4 MiB font page per new glyph); `Pixmap.setPixels()` now reaches the native pixmap; undecodable images and failed allocations throw `GdxRuntimeException`
+- FreeType: the bridged heap views follow heap growth; a failed load rejects `__freetypeReady`; the gamma-1 fast path no longer produces blank glyphs
+- Startup failures end in a dialog: failed subpackage downloads retry, and engine/WASM/main failures or a 30 s stall offer a restart, instead of hanging on the splash
+- A frame exception shows a restart dialog instead of a silent frozen screen; override `MiniGameApplication.onFatalError(Throwable)` to customize it
+- Audio: pooled contexts no longer gain an `onEnded` listener per play; sounds and music pause while hidden or interrupted (calls, alarms) and resume only what was playing
+- `wx.onTouchCancel` is delivered as `touchCancelled`, so a system-cancelled touch no longer presses buttons
+- Each build empties the release directory (keeping `project.private.config.json`), so stale debug output (`src/`, `.js.map`, `.teavmdbg`), removed assets and old rename-map entries no longer ship; `packOptions.ignore` excludes debug output; a missing `gdx.wasm.js` or WASM data URI fails the build; `rename-map.json` is escaped and always written
+- Preferences: `flush()` writes only changed keys; a key's type can change without leaving the old typed key; mismatched getters parse or return the default instead of throwing `ClassCastException`
+- Asset loader/downloader listeners are called; `AssetManager` throws "Couldn't load file" for a missing file instead of loading forever
+- `MiniGameFileHandle` no longer shadows `FileHandle.type`, which broke `hashCode()`/`equals()`
 
 [1.2.1]
 - Updated to libgdx 1.13.5

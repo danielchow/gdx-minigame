@@ -246,6 +246,7 @@ find minigame/build/dist/minigame -path "*/templates/*" -type f
 ## Testing
 
 - `./gradlew :backends:backend-minigame:check` runs `testRuntime` (needs `node` on `PATH`). It compiles the probe programs in `src/test/java/.../regression/` through `MiniGameBackend`, then `src/test/js/*.test.mjs` runs them, and the bundled `gdx.wasm.js`, in Node against the real WASM. Coverage: void WASM imports return nothing, pixmap buffer copying/ownership, and asset tasks completing exactly once.
+- The same `check` also runs JUnit build-output tests (`src/test/java/.../config/backend/BuildOutputTest`) and `:extensions:gdx-freetype-teavm:check` runs the FreeType loader in Node. Add Node tests as `src/test/js/*.test.mjs` (picked up automatically) and probes to `RegressionProbeBuilder`.
 - Node is not WeChat. Device-specific behavior still needs the Build-Publish-Test cycle below, including an iOS preview for anything touching the engine or loading.
 - When editing `gdx.wasm.js`, work on bytes: it is minified, contains CRLF line endings, and `.gitattributes` marks `*.js` as binary.
 
