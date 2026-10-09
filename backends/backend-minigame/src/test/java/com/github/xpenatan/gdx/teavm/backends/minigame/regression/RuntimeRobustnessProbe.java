@@ -4,6 +4,8 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplication;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplicationConfiguration;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAudio;
@@ -112,6 +114,11 @@ public final class RuntimeRobustnessProbe {
                         default: return "OS X".equals(System.getProperty("os.name")) ? 1 : 0;
                     }
                 }
+                // Reaches WebGL20.glTexImage2D, so the release-logging test sees its code.
+                case "texImage2D":
+                    Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, 1, 1, 0, GL20.GL_RGBA,
+                        GL20.GL_UNSIGNED_BYTE, BufferUtils.newByteBuffer(4));
+                    return 0;
                 case "densityTimes100": return (int) Math.round(((MiniGameGraphics) Gdx.graphics).getNativeScreenDensity() * 100);
                 default: throw new IllegalArgumentException(command);
             }

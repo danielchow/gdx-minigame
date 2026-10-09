@@ -43,8 +43,6 @@ public class MiniGameApplication implements Application {
     private static final String WEB_SCRIPT_PATH = "WEB_SCRIPT_PATH";
     private static final String WEB_ASSET_PATH = "WEB_ASSET_PATH";
 
-    private boolean firstFrameTimed = false;
-
     public static MiniGameApplication get() {
         return (MiniGameApplication) Gdx.app;
     }
@@ -83,8 +81,6 @@ public class MiniGameApplication implements Application {
     }
 
     protected void init() {
-        long initStart = System.currentTimeMillis();
-        System.out.println("[PERF] phase=java_init start=" + initStart);
         updateErrorStack();
 
         // Set system properties
@@ -112,14 +108,11 @@ public class MiniGameApplication implements Application {
         graphics = createGraphics(config);
         input = new MiniGameInput(this, graphics.canvas);
         files = new MiniGameFiles(config, this);
-        long afterFiles = System.currentTimeMillis();
-        System.out.println("[PERF] phase=java_init after_files dur=" + (afterFiles - initStart));
         net = new MiniGameNet();
         logger = new WebApplicationLogger();
         clipboard = new MiniGameClipboard();
 
         initNativeLibraries();
-        System.out.println("[PERF] phase=java_init after_native_libs dur=" + (System.currentTimeMillis() - initStart));
 
         // Set Gdx singletons
         Gdx.app = this;
@@ -134,8 +127,6 @@ public class MiniGameApplication implements Application {
         Gdx.net = net;
         this.audio = new MiniGameAudio();
         Gdx.audio = audio;
-
-        System.out.println("[PERF] phase=java_init after_setup dur=" + (System.currentTimeMillis() - initStart));
 
         // Lifecycle: wx.onHide → pause
         WX.onHide((OnHideCallback) () -> {
@@ -180,7 +171,6 @@ public class MiniGameApplication implements Application {
             }
         };
 
-        System.out.println("[PERF] phase=java_init end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - initStart));
         // Start
         WX.requestAnimationFrame(callback -> {
             step(curListener);
@@ -206,10 +196,7 @@ public class MiniGameApplication implements Application {
                 input.reset();
                 runnables.clear();
                 graphics.frameId = 0;
-                long createStart = System.currentTimeMillis();
-                System.out.println("[PERF] phase=app_create start=" + createStart);
                 appListener.create();
-                System.out.println("[PERF] phase=app_create end=" + System.currentTimeMillis() + " dur=" + (System.currentTimeMillis() - createStart));
                 resizeBypass = true;
             }
 
@@ -227,11 +214,6 @@ public class MiniGameApplication implements Application {
             runnablesHelper.clear();
             graphics.frameId++;
             graphics.render(appListener);
-            if (!firstFrameTimed) {
-                firstFrameTimed = true;
-                System.out.println("[PERF] phase=first_frame_render end=" + System.currentTimeMillis());
-                markFirstFrameJS();
-            }
             input.reset();
 
         } catch (Throwable t) {
@@ -282,21 +264,21 @@ public class MiniGameApplication implements Application {
             int count = i + 1;
             JSObject errorJS = errorsJS[i];
             if (i > 0) {
-                consoleLog("%cException " + count + ": " + exceptions[i], "color: #FF0000");
+                consoleError("%cException " + count + ": " + exceptions[i], "color: #FF0000");
             }
-            consoleLogError(errorJS);
+            consoleError(errorJS);
         }
         groupEnd();
     }
 
-    @JSBody(params = "error", script = "console.log(error);")
-    private static native void consoleLogError(JSObject error);
+    @JSBody(params = "error", script = "console.error(error);")
+    private static native void consoleError(JSObject error);
 
     @JSBody(script = "if(typeof Error.stackTraceLimit !== 'undefined') { Error.stackTraceLimit = Infinity; }")
     private static native void updateErrorStack();
 
-    @JSBody(params = {"msg", "param"}, script = "console.log(msg, param);")
-    private static native void consoleLog(String msg, String param);
+    @JSBody(params = {"msg", "param"}, script = "console.error(msg, param);")
+    private static native void consoleError(String msg, String param);
 
     @JSBody(params = {"text", "param"}, script = "console.groupCollapsed(text, param);")
     private static native void groupCollapsed(String text, String param);
@@ -306,9 +288,6 @@ public class MiniGameApplication implements Application {
 
     @JSBody(params = "text", script = "console.log(text);")
     public static native void print(String text);
-
-    @JSBody(script = "globalThis.__perfFirstFrame = Date.now();")
-    private static native void markFirstFrameJS();
 
     @JSBody(script = "return globalThis.canvas;")
     private static native JSObject getGlobalCanvas();

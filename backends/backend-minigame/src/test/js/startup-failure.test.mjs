@@ -6,21 +6,21 @@ import test from 'node:test';
 // game.js as MiniGameBackend generated it, with ${mainClassArgs} substituted.
 const gameJs = new URL('../../../build/regression-probes/async-completion/minigame/game.js', import.meta.url);
 
+const quiet = new Proxy({}, {get: () => () => {}});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 /**
  * Runs game.js against a mocked wx. Each subpackage name maps to a list of outcomes, one per
  * wx.loadSubpackage call: 'fail', or a function run as the subpackage script before success.
  */
-function startGame(outcomes, {mainError, mainCallbackError} = {}) {
+function startGame(outcomes, {mainError, mainCallbackError, console = quiet} = {}) {
     const loads = [];
     const modals = [];
     const restarts = [];
     const timers = [];
     const rejectionListeners = [];
     const mainCalls = [];
-    const quiet = new Proxy({}, {get: () => () => {}});
-    const context = vm.createContext({console: quiet, Date, Promise, Error,
+    const context = vm.createContext({console, Date, Promise, Error,
         setTimeout(callback, delay) {timers.push({callback, delay}); return timers.length;},
         clearTimeout(id) {if (timers[id - 1]) timers[id - 1].cleared = true;}});
     vm.runInContext('var window = globalThis;', context);
@@ -139,4 +139,13 @@ test('a WASM instantiation rejection during startup ends in a restart dialog', a
     assert.equal(game.modals.length, 1);
     game.modals[0].complete({confirm: true});
     assert.equal(game.restarts.length, 1);
+});
+
+test('a successful startup logs nothing', async () => {
+    const calls = [];
+    const console = new Proxy({}, {get: (target, method) => (...args) => calls.push([method, ...args])});
+    const game = startGame({}, {console});
+    await settleAll();
+    assert.equal(game.mainCalls.length, 1);
+    assert.deepEqual(calls, []);
 });

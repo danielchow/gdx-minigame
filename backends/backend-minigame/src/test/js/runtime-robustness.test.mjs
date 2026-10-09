@@ -33,7 +33,7 @@ function noopProxy(values = {}) {
     return new Proxy(values, {get: (target, key) => key in target ? target[key] : () => null});
 }
 
-function startProbe(platform = 'devtools') {
+function startProbe(platform = 'devtools', console = noopProxy()) {
     const frames = [];
     const listeners = {};
     const contexts = [];
@@ -66,8 +66,7 @@ function startProbe(platform = 'devtools') {
         restartMiniProgram: options => restarts.push(options),
     });
     const canvas = {width: 100, height: 200, getContext: () => gl};
-    const quiet = noopProxy();
-    const context = vm.createContext({exports: {}, console: quiet, performance, wx, canvas, __robustnessProbe: report,
+    const context = vm.createContext({exports: {}, console, performance, wx, canvas, __robustnessProbe: report,
         requestAnimationFrame(callback) {frames.push(callback); return frames.length;},
         cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays});
     vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
@@ -245,3 +244,13 @@ test('platform flags follow WeChat\'s lowercase platform names', () => {
     assert.deepEqual(flags(ios), {android: 0, ios: 1, osX: 1});
 });
 
+test('startup, frames, sounds and texture uploads log no progress or timing', () => {
+    const calls = [];
+    const probe = startProbe('devtools', new Proxy({}, {get: (target, method) => (...args) => calls.push(method)}));
+    for (let i = 0; i < 3; i++) probe.runFrames();
+    probe.command('playSound');
+    probe.command('texImage2D');
+    probe.runFrames();
+    // TeaVM prints System.out as console.info; warnings and errors stay allowed.
+    assert.deepEqual(calls.filter(method => ['log', 'info', 'debug'].includes(method)), []);
+});
