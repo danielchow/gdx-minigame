@@ -94,10 +94,6 @@ public class MiniGameBackend extends TeaBackend {
     @Override
     protected void build(TeaCompilerData data) {
         super.build(data);
-        // Post-build steps (TeaVM output now exists)
-        fixFreetypeModuleScoping();
-        // moveJsFilesToRoot() removed — JS files stay in subpackages/engine/
-
         // Move TeaVM output (app.js) to game subpackage — can't do this in copyAssets()
         // because TeaVM hasn't produced the file yet at that point
         FileHandle gameFolder = releasePath.child("subpackages/game");
@@ -239,15 +235,6 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     /**
-     * FreeType WASM module scoping is handled by freetype-loader.js,
-     * which bridges the modularized WASM exports to globalThis.Module.
-     * No string patching needed for the WASM-based build.
-     */
-    private void fixFreetypeModuleScoping() {
-        System.out.println("[MiniGameBackend] FreeType WASM — scoping handled by freetype-loader.js, skipping asm.js patches");
-    }
-
-    /**
      * Extract embedded WASM binary from gdx.wasm.js and write it as subpackages/engine/gdx.wasm.
      * The JS file contains base64 WASM data in a data URL like:
      *   O="data:application/octet-stream;base64,AGFzbQ..."
@@ -318,27 +305,6 @@ public class MiniGameBackend extends TeaBackend {
                 .filter(line -> !line.contains("templates/minigame/"))
                 .collect(java.util.stream.Collectors.joining("\n", "", "\n"));
             preloadTxt.writeString(cleaned, false);
-        }
-
-        // Clean up old directory structure from incremental builds
-        FileHandle oldScripts = releasePath.child("scripts");
-        if (oldScripts.exists()) {
-            oldScripts.deleteDirectory();
-            System.out.println("[MiniGameBackend] Cleaned up old scripts/ directory");
-        }
-        FileHandle oldAdapter = releasePath.child("adapter");
-        if (oldAdapter.exists()) {
-            oldAdapter.deleteDirectory();
-            System.out.println("[MiniGameBackend] Cleaned up old adapter/ directory");
-        }
-        // Clean up old root-level JS files from previous build layout
-        String[] oldRootJs = {"freetype.js", "gdx.wasm.js", "app.js"};
-        for (String js : oldRootJs) {
-            FileHandle oldFile = releasePath.child(js);
-            if (oldFile.exists()) {
-                oldFile.delete();
-                System.out.println("[MiniGameBackend] Cleaned up old root-level " + js);
-            }
         }
 
         // Engine subpackage: scripts → subpackages/engine/

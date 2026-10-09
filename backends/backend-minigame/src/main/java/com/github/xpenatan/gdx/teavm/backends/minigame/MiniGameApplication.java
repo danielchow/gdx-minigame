@@ -30,7 +30,7 @@ import java.util.ArrayList;
 
 /**
  * Main application class for WeChat Mini Game.
- * Forked from WebApplication with DOM dependencies removed:
+ * Forked from backend-web's WebApplication with DOM dependencies removed:
  * - No WebWindow — canvas from config
  * - No document.visibilitychange — uses wx.onShow/onHide
  * - No window.addEventListener("resize") — uses wx.onWindowResize

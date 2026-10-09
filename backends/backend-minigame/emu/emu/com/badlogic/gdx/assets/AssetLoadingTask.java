@@ -67,7 +67,6 @@ public class AssetLoadingTask implements AsyncTask<Void> {
     }
 
     public boolean update() {
-        // GTW: check if we have a file that was not preloaded and is not done loading yet
         AssetLoader assetLoader = AssetInstance.getLoaderInstance();
         FileHandle fileHandle = resolve(loader, assetDesc);
         String path = fileHandle.path();

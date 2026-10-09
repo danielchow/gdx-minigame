@@ -2,7 +2,7 @@ package com.github.xpenatan.gdx.teavm.backends.minigame;
 
 /**
  * Configuration for MiniGameApplication.
- * Stripped of all browser/DOM-specific fields from WebApplicationConfiguration.
+ * Stripped of all browser/DOM-specific fields from backend-web's WebApplicationConfiguration.
  *
  * <p>The loading splash (templates/minigame/first-screen.js) creates the WebGL context before
  * Java runs, and the canvas keeps that context. Its attributes match the defaults below; change
