@@ -10,7 +10,6 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.LongMap;
 import com.badlogic.gdx.utils.StreamUtils;
-import com.github.xpenatan.gdx.teavm.backends.web.dom.typedarray.TypedArrays;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -100,7 +99,7 @@ public class FreeType {
         }
 
         public Face newMemoryFace(ByteBuffer buffer, int faceIndex) {
-            ArrayBufferView buf = TypedArrays.getInt8Array(buffer);
+            ArrayBufferView buf = Int8Array.fromJavaBuffer(buffer);
             int[] addressToFree = new int[]{0}; // Hacky way to get two return values
 
             int face = newMemoryFace(address, buf, buffer.remaining(), faceIndex, addressToFree);
@@ -564,7 +563,7 @@ public class FreeType {
             int length = getBufferSize(address);
             Int8Array int8ArrayWrapper = getBuffer(address, offset, length);
 
-            byte[] byteArray = TypedArrays.toByteArray(int8ArrayWrapper);
+            byte[] byteArray = int8ArrayWrapper.copyToJavaArray();
             ByteBuffer buf = ByteBuffer.wrap(byteArray, 0, length);
             return buf;
         }

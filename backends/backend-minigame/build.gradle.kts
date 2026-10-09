@@ -22,6 +22,9 @@ dependencies {
     implementation("com.github.xpenatan:jMultiplatform:${LibExt.jMultiplatform}")
 
     testImplementation("junit:junit:4.13.2")
+    // FreeTypeGlyphProbe: the mini game FreeType extension, compiled against libGDX's FreeType API.
+    testImplementation(project(":extensions:gdx-freetype-teavm"))
+    testImplementation("com.badlogicgames.gdx:gdx-freetype:${LibExt.gdxVersion}")
 }
 
 val regressionProbes = layout.buildDirectory.dir("regression-probes")

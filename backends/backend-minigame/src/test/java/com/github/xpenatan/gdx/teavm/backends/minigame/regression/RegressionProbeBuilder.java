@@ -17,6 +17,7 @@ public final class RegressionProbeBuilder {
         build(GLUploadRangeProbe.class, new File(outputRoot, "gl-upload-range"));
         build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"));
         build(StorageAndAssetsProbe.class, new File(outputRoot, "storage-and-assets"));
+        build(FreeTypeGlyphProbe.class, new File(outputRoot, "freetype-glyph"));
     }
 
     private static void build(Class<?> probe, File output) {

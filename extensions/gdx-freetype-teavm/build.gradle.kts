@@ -1,7 +1,10 @@
 val moduleName = "gdx-freetype-teavm"
 
 dependencies {
-    implementation(project(":backends:backend-web"))
+    // Compile-time only: the emu pixmap classes this extension references are supplied by whichever backend
+    // the game uses (backend-web or backend-minigame, same names). A runtime dependency would put
+    // backend-web's emu classes on a mini game's classpath, where only classpath order picks the right ones.
+    compileOnly(project(":backends:backend-web"))
     implementation("com.badlogicgames.gdx:gdx:${LibExt.gdxVersion}")
 }
 
