@@ -166,8 +166,17 @@ public class MiniGameInput extends AbstractInput {
     }
     @Override public boolean isButtonJustPressed(int button) { return false; }
 
-    @Override public void getTextInput(TextInputListener listener, String title, String text, String hint) {}
-    @Override public void getTextInput(TextInputListener listener, String title, String text, String hint, OnscreenKeyboardType keyboardType) {}
+    @Override public void getTextInput(TextInputListener listener, String title, String text, String hint) {
+        getTextInput(listener, title, text, hint, OnscreenKeyboardType.Default);
+    }
+
+    /**
+     * WeChat has no native text input dialog, so the request is canceled. As on Android, the
+     * listener is called on the next frame rather than from inside this call.
+     */
+    @Override public void getTextInput(TextInputListener listener, String title, String text, String hint, OnscreenKeyboardType keyboardType) {
+        if (listener != null) app.postRunnable(listener::canceled);
+    }
 
     @Override public void setOnscreenKeyboardVisible(boolean visible) {
         if (visible) WX.showKeyboard(null); else WX.hideKeyboard();
@@ -180,10 +189,26 @@ public class MiniGameInput extends AbstractInput {
     @Override public void closeTextInputField(boolean sendReturn) { setOnscreenKeyboardVisible(false); }
     @Override public void setKeyboardHeightObserver(KeyboardHeightObserver observer) {}
 
-    @Override public void vibrate(int milliseconds) { WX.vibrateLong(); }
-    @Override public void vibrate(int milliseconds, boolean fallback) { WX.vibrateLong(); }
-    @Override public void vibrate(int milliseconds, int amplitude, boolean fallback) { WX.vibrateLong(); }
-    @Override public void vibrate(VibrationType vibrationType) { WX.vibrateShort(); }
+    /**
+     * WeChat offers only wx.vibrateShort (15 ms) and wx.vibrateLong (400 ms). A request shorter
+     * than this, about halfway between them, gets the short vibration at medium strength, which
+     * is what games asking for a brief buzz usually want; anything longer gets the long one.
+     */
+    static final int LONG_VIBRATION_MIN_MS = 200;
+
+    @Override public void vibrate(int milliseconds) { vibrate(milliseconds, true); }
+    @Override public void vibrate(int milliseconds, boolean fallback) { vibrate(milliseconds, -1, fallback); }
+    @Override public void vibrate(int milliseconds, int amplitude, boolean fallback) {
+        if (milliseconds < LONG_VIBRATION_MIN_MS) WX.vibrateShort("medium");
+        else WX.vibrateLong();
+    }
+    @Override public void vibrate(VibrationType vibrationType) {
+        switch (vibrationType) {
+            case LIGHT: WX.vibrateShort("light"); break;
+            case HEAVY: WX.vibrateShort("heavy"); break;
+            default: WX.vibrateShort("medium");
+        }
+    }
 
     @Override public float getAzimuth() { return 0; }
     @Override public float getPitch() { return 0; }

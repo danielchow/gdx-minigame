@@ -29,7 +29,7 @@ import org.teavm.jso.webgl.WebGLRenderingContext;
  * - No setTitle (no title bar on WeChat)
  * - No CSS cursor manipulation
  * - Screen size via wx.getSystemInfoSync() instead of screen.*
- * - Density via wx.getSystemInfoSync().pixelRatio instead of devicePixelRatio
+ * - Density from wx.getWindowInfo().pixelRatio, cached, instead of devicePixelRatio
  */
 public class MiniGameGraphics implements Graphics {
 
@@ -208,12 +208,14 @@ public class MiniGameGraphics implements Graphics {
     public GraphicsType getType() { return GraphicsType.WebGL; }
 
     // === Density & PPI ===
+    // WeChat reports no physical ppi. As on Android, where density is about the device pixel
+    // ratio and 1.0 means 160 dpi, density is the pixel ratio and ppi is 160 times it.
 
     @Override
-    public float getPpiX() { return 96f * (float) getNativeScreenDensity(); }
+    public float getPpiX() { return 160f * (float) getNativeScreenDensity(); }
 
     @Override
-    public float getPpiY() { return 96f * (float) getNativeScreenDensity(); }
+    public float getPpiY() { return 160f * (float) getNativeScreenDensity(); }
 
     @Override
     public float getPpcX() { return getPpiX() / 2.54f; }
@@ -223,8 +225,7 @@ public class MiniGameGraphics implements Graphics {
 
     @Override
     public float getDensity() {
-        float ppiX = getPpiX();
-        return (ppiX > 0 && ppiX <= Float.MAX_VALUE) ? ppiX / 160f : 1f;
+        return (float) getNativeScreenDensity();
     }
 
     public double getNativeScreenDensity() {

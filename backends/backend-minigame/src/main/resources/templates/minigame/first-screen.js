@@ -12,18 +12,14 @@ exports.start = function(c) {
         // this context. Keep them in sync with MiniGameApplicationConfiguration's defaults.
         GL = canvas.getContext('webgl', {alpha: false, antialias: false, stencil: false,
             premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance'});
-        if (!GL) {
-            console.log('[first-screen] WebGL not available, skipping splash');
-            return;
-        }
+        if (!GL) return;
         GL.viewport(0, 0, canvas.width, canvas.height);
         GL.scissor(0, 0, canvas.width, canvas.height);
         GL.enable(GL.SCISSOR_TEST);
         GL.clearColor(0.1, 0.1, 0.15, 1.0);
         GL.clear(GL.COLOR_BUFFER_BIT);
-        console.log('[first-screen] Splash drawn', canvas.width, 'x', canvas.height);
     } catch(e) {
-        console.log('[first-screen] Splash failed:', e.message);
+        console.warn('[first-screen] Splash failed:', e.message);
     }
 };
 

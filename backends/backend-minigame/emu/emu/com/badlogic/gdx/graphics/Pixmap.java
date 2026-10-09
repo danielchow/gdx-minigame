@@ -91,7 +91,6 @@ public class Pixmap implements Disposable, PixmapNativeInterface {
     public Pixmap(FileHandle file) {
         String path = file.path();
         if(!file.exists()) {
-            // Add a way to debug when assets was not loaded in preloader.
             throw new GdxRuntimeException("File is null, it does not exist: " + path);
         }
         byte[] bytes = file.readBytes();

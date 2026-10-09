@@ -55,6 +55,8 @@ public final class StorageAndAssetsProbe {
         loader.loadAsset("present.txt", AssetType.Binary, FileType.Internal, listener("loader-present"));
         loader.loadAsset("missing.png", AssetType.Binary, FileType.Internal, listener("loader-missing"));
         loader.loadAsset("present.txt", AssetType.Binary, FileType.Internal, listener("loader-overwrite"), true);
+        loader.preload("assets.txt", completion("loader-preload"));
+        loader.loadScript("freetype.js", completion("loader-script"));
     }
 
     private static void downloaderListeners() {
@@ -84,6 +86,21 @@ public final class StorageAndAssetsProbe {
                 StringBuilder text = new StringBuilder();
                 for (int i = 0; i < result.length(); i++) text.append((char) result.get(i));
                 result(name, "success:" + url + ":" + text);
+            }
+        };
+    }
+
+    /** Records whether a listener without a meaningful result completed. */
+    private static <T> AssetLoaderListener<T> completion(String name) {
+        return new AssetLoaderListener<T>() {
+            @Override
+            public void onFailure(String url) {
+                result(name, "failure:" + url);
+            }
+
+            @Override
+            public void onSuccess(String url, T result) {
+                result(name, "success:" + url);
             }
         };
     }

@@ -6,14 +6,21 @@ import {typedArrays} from './engine.mjs';
 
 const app = new URL('../../../build/regression-probes/runtime-robustness/minigame/subpackages/game/app.js', import.meta.url);
 
-/** InnerAudioContext that, like WeChat's, adds a listener on every on*() call. */
+/**
+ * InnerAudioContext that, like WeChat's, adds a listener on every on*() call. Assigning src
+ * makes WeChat load the audio again, so the mock counts assignments.
+ */
 class MockAudioContext {
-    constructor() {
+    constructor(options) {
+        this.options = options;
+        this.srcAssignments = 0;
         this.ended = [];
         this.errors = [];
         this.state = 'idle';
         this.destroyed = false;
     }
+    get src() {return this.currentSrc;}
+    set src(value) {this.currentSrc = value; this.srcAssignments++;}
     onEnded(listener) {this.ended.push(listener);}
     offEnded(listener) {this.ended = listener ? this.ended.filter(l => l !== listener) : [];}
     onError(listener) {this.errors.push(listener);}
@@ -33,12 +40,14 @@ function noopProxy(values = {}) {
     return new Proxy(values, {get: (target, key) => key in target ? target[key] : () => null});
 }
 
-function startProbe(platform = 'devtools') {
+function startProbe(platform = 'devtools', console = noopProxy()) {
     const frames = [];
     const listeners = {};
     const contexts = [];
     const modals = [];
     const restarts = [];
+    const vibrations = [];
+    const exits = [];
     const report = {events: []};
     const on = name => listener => (listeners[name] ??= []).push(listener);
     const gl = noopProxy({getParameter: () => 'WebGL 1.0 (probe)', getExtension: () => null,
@@ -53,8 +62,8 @@ function startProbe(platform = 'devtools') {
         env: {USER_DATA_PATH: 'wxfile://usr'},
         getStorageSync: () => '',
         getStorageInfoSync: () => ({keys: []}),
-        createInnerAudioContext() {
-            const context = new MockAudioContext();
+        createInnerAudioContext(options) {
+            const context = new MockAudioContext(options);
             contexts.push(context);
             return context;
         },
@@ -64,10 +73,12 @@ function startProbe(platform = 'devtools') {
         onTouchEnd: on('touchend'), onTouchCancel: on('touchcancel'),
         showModal: options => modals.push(options),
         restartMiniProgram: options => restarts.push(options),
+        exitMiniProgram: options => exits.push(options),
+        vibrateShort: options => vibrations.push(['short', options?.type]),
+        vibrateLong: () => vibrations.push(['long']),
     });
     const canvas = {width: 100, height: 200, getContext: () => gl};
-    const quiet = noopProxy();
-    const context = vm.createContext({exports: {}, console: quiet, performance, wx, canvas, __robustnessProbe: report,
+    const context = vm.createContext({exports: {}, console, performance, wx, canvas, __robustnessProbe: report,
         requestAnimationFrame(callback) {frames.push(callback); return frames.length;},
         cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays});
     vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
@@ -77,7 +88,7 @@ function startProbe(platform = 'devtools') {
 
     const fire = (name, event) => {for (const listener of listeners[name] ?? []) listener(event);};
     return {
-        report, contexts, modals, restarts, listeners, fire, windowInfo,
+        report, contexts, modals, restarts, vibrations, exits, listeners, fire, windowInfo,
         command: (name, arg = 0) => report.command(name, arg),
         /** Runs every frame queued so far; returns how many ran. */
         runFrames() {
@@ -91,6 +102,7 @@ function startProbe(platform = 'devtools') {
 }
 
 const soundContexts = probe => probe.contexts.filter(c => c.src === 'assets/effect.mp3');
+const eventCount = (probe, name) => probe.report.events.filter(e => e === name + ':0').length;
 const musicContext = (probe, i) => probe.contexts.find(c => c.src === `assets/music${i}.mp3`);
 
 test('pooled sound contexts keep one listener each over many plays, and pool and steal still work', () => {
@@ -245,3 +257,83 @@ test('platform flags follow WeChat\'s lowercase platform names', () => {
     assert.deepEqual(flags(ios), {android: 0, ios: 1, osX: 1});
 });
 
+test('startup, frames, sounds and texture uploads log no progress or timing', () => {
+    const calls = [];
+    const probe = startProbe('devtools', new Proxy({}, {get: (target, method) => (...args) => calls.push(method)}));
+    for (let i = 0; i < 3; i++) probe.runFrames();
+    probe.command('playSound');
+    probe.command('texImage2D');
+    probe.runFrames();
+    // TeaVM prints System.out as console.info; warnings and errors stay allowed.
+    assert.deepEqual(calls.filter(method => ['log', 'info', 'debug'].includes(method)), []);
+});
+
+test('sound contexts use the WebAudio implementation and music keeps the default', () => {
+    const probe = startProbe();
+    probe.command('playSound');
+    probe.command('playMusic', 0);
+    assert.equal(soundContexts(probe)[0].options?.useWebAudioImplement, true);
+    assert.equal(musicContext(probe, 0).options?.useWebAudioImplement, undefined);
+});
+
+test('a reused sound context is not given its source again', () => {
+    const probe = startProbe();
+    for (let i = 0; i < 5; i++) {
+        probe.command('playSound');
+        soundContexts(probe)[0].end();
+    }
+    const [context] = soundContexts(probe);
+    assert.equal(soundContexts(probe).length, 1);
+    assert.equal(context.srcAssignments, 1, 'replaying the same sound does not reload it');
+    assert.equal(context.state, 'stopped');
+
+    probe.command('playOtherSound');
+    assert.equal(context.src, 'assets/other.mp3', 'another sound still switches the source');
+    assert.equal(context.state, 'playing');
+    context.end();
+    probe.command('playSound');
+    assert.equal(context.src, 'assets/effect.mp3');
+    assert.equal(context.srcAssignments, 3);
+
+    // After a load error the source is set again, so the next play retries the load.
+    for (const listener of [...context.errors]) listener({errMsg: 'decode failed'});
+    assert.equal(soundContexts(probe).filter(c => c.state === 'playing').length, 0);
+    probe.command('playSound');
+    assert.equal(context.srcAssignments, 4);
+    assert.equal(context.state, 'playing');
+});
+
+test('vibrate picks the short or long vibration by duration, and maps vibration types', () => {
+    const probe = startProbe();
+    for (const ms of [1, 50, 199, 200, 400, 1000]) probe.command('vibrate', ms);
+    for (const type of [0, 1, 2]) probe.command('vibrateType', type);
+    assert.deepEqual(probe.vibrations, [
+        ['short', 'medium'], ['short', 'medium'], ['short', 'medium'], ['long'], ['long'], ['long'],
+        ['short', 'light'], ['short', 'medium'], ['short', 'heavy'],
+    ]);
+});
+
+test('getTextInput cancels, since WeChat has no text input dialog', () => {
+    const probe = startProbe();
+    probe.runFrames();
+    probe.command('textInput', 0);
+    probe.command('textInput', 1);
+    probe.runFrames();
+    assert.equal(eventCount(probe, 'textCanceled'), 2);
+    assert.equal(eventCount(probe, 'textInput'), 0);
+});
+
+test('exit leaves the mini game', () => {
+    const probe = startProbe();
+    probe.command('exit');
+    assert.equal(probe.exits.length, 1);
+});
+
+test('density matches the pixel ratio, as on Android, and ppi follows it', () => {
+    const probe = startProbe();
+    probe.windowInfo.pixelRatio = 3;
+    probe.fire('windowResize', {});
+    assert.equal(probe.command('graphicsDensityTimes100'), 300);
+    assert.equal(probe.command('ppiX'), 480);
+    assert.equal(probe.command('ppiY'), 480);
+});

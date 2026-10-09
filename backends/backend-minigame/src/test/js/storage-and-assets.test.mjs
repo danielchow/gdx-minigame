@@ -106,6 +106,11 @@ test('asset loader and downloader listeners fire', () => {
     assert.equal(results['pixmap-download'], 'failed');
 });
 
+test('preload and loadScript report completion', () => {
+    assert.equal(results['loader-preload'], 'success:assets.txt');
+    assert.equal(results['loader-script'], 'success:freetype.js');
+});
+
 test('AssetManager reports a missing file instead of loading forever', () => {
     assert.equal(results['manager-present'], 'loaded:hi!');
     assert.match(results['manager-missing'] ?? '', /^threw\|.*Couldn't load file: missing\.bin/);

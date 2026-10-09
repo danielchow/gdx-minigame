@@ -19,12 +19,11 @@ import org.teavm.jso.typedarrays.Int8Array;
 /**
  * On-demand file storage for Internal/Classpath assets on WeChat Mini Game.
  *
- * Instead of preloading all assets into a HashMap (the old MemoryFileStorage approach),
- * this reads the preload.txt manifest at construction to populate metadata only
+ * Reads the preload.txt manifest at construction to populate metadata only
  * (file paths, directory paths), then reads file contents on-demand via
  * wx.getFileSystemManager().readFileSync().
  *
- * This eliminates ~519ms of JS-to-JS copy overhead from the startup path.
+ * Nothing is copied into memory up front, which keeps startup independent of asset size.
  */
 public class InternalStorage extends FileDB {
 
@@ -81,7 +80,7 @@ public class InternalStorage extends FileDB {
     private void loadManifest() {
         String manifest = WX.fsReadFileSyncText(fsm, "assets/preload.txt");
         if (manifest == null) {
-            System.out.println("[InternalStorage] No preload.txt found, storage will be empty");
+            System.err.println("[InternalStorage] No assets/preload.txt found, internal files will be empty");
             return;
         }
         String[] lines = manifest.split("\\n");
@@ -108,7 +107,6 @@ public class InternalStorage extends FileDB {
                 inferDirectories(normalized);
             }
         }
-        System.out.println("[InternalStorage] Manifest loaded: " + filePaths.size() + " files, " + dirPaths.size() + " dirs");
     }
 
     private void inferDirectories(String filePath) {
@@ -123,13 +121,12 @@ public class InternalStorage extends FileDB {
     private void loadRenameMap() {
         String json = WX.fsReadFileSyncText(fsm, "assets/rename-map.json");
         if (json == null) {
-            System.out.println("[InternalStorage] No rename-map.json found");
+            System.err.println("[InternalStorage] No assets/rename-map.json found, renamed files will not be found");
             return;
         }
         // Simple JSON parse: {"key1":"val1","key2":"val2"}
         // We can't use a JSON library in TeaVM, so parse manually.
         parseRenameMap(json);
-        System.out.println("[InternalStorage] Rename map loaded: " + renameMap.size() + " entries");
     }
 
     private void parseRenameMap(String json) {

@@ -9,8 +9,8 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.Internal
 
 /**
  * Files implementation for WeChat Mini Game.
- * Forked from WebFiles — uses MemoryFileStorage for internal/classpath,
- * and PersistentFileStorage (WX FileSystemManager) for local.
+ * Forked from WebFiles — uses InternalStorage (on-demand reads of the packaged assets/) for
+ * internal and classpath, and PersistentFileStorage (WX FileSystemManager) for local.
  */
 public class MiniGameFiles implements Files {
 

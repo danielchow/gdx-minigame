@@ -2,8 +2,11 @@ package com.github.xpenatan.gdx.teavm.backends.minigame.regression;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplication;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplicationConfiguration;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAudio;
@@ -68,6 +71,7 @@ public final class RuntimeRobustnessProbe {
 
         MiniGameAudio audio = (MiniGameAudio) app.getAudio();
         MiniGameSound sound = audio.newSound(new FileHandle("effect.mp3"));
+        MiniGameSound otherSound = audio.newSound(new FileHandle("other.mp3"));
         MiniGameMusic[] music = new MiniGameMusic[3];
         for (int i = 0; i < music.length; i++) music[i] = audio.newMusic(new FileHandle("music" + i + ".mp3"));
 
@@ -75,6 +79,7 @@ public final class RuntimeRobustnessProbe {
             switch (command) {
                 case "playSound": return (int) sound.play();
                 case "loopSound": return (int) sound.loop();
+                case "playOtherSound": return (int) otherSound.play();
                 case "pauseSound": sound.pause(arg); return 0;
                 case "resumeSound": sound.resume(arg); return 0;
                 case "stopSound": sound.stop(arg); return 0;
@@ -112,6 +117,33 @@ public final class RuntimeRobustnessProbe {
                         default: return "OS X".equals(System.getProperty("os.name")) ? 1 : 0;
                     }
                 }
+                case "vibrate": Gdx.input.vibrate(arg); return 0;
+                case "vibrateType": Gdx.input.vibrate(Input.VibrationType.values()[arg]); return 0;
+                case "textInput": {
+                    Input.TextInputListener listener = new Input.TextInputListener() {
+                        @Override
+                        public void input(String text) {
+                            record("textInput", 0);
+                        }
+
+                        @Override
+                        public void canceled() {
+                            record("textCanceled", 0);
+                        }
+                    };
+                    if (arg == 0) Gdx.input.getTextInput(listener, "title", "text", "hint");
+                    else Gdx.input.getTextInput(listener, "title", "text", "hint", Input.OnscreenKeyboardType.Default);
+                    return 0;
+                }
+                case "exit": Gdx.app.exit(); return 0;
+                case "graphicsDensityTimes100": return Math.round(Gdx.graphics.getDensity() * 100);
+                case "ppiX": return Math.round(Gdx.graphics.getPpiX());
+                case "ppiY": return Math.round(Gdx.graphics.getPpiY());
+                // Reaches WebGL20.glTexImage2D, so the release-logging test sees its code.
+                case "texImage2D":
+                    Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, 1, 1, 0, GL20.GL_RGBA,
+                        GL20.GL_UNSIGNED_BYTE, BufferUtils.newByteBuffer(4));
+                    return 0;
                 case "densityTimes100": return (int) Math.round(((MiniGameGraphics) Gdx.graphics).getNativeScreenDensity() * 100);
                 default: throw new IllegalArgumentException(command);
             }
