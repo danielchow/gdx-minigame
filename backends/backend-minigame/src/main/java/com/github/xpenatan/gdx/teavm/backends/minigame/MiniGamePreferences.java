@@ -1,8 +1,10 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame;
 
 import com.badlogic.gdx.Preferences;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.ObjectMap;
+import com.badlogic.gdx.utils.ObjectSet;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.HEXCoder;
 import java.util.HashMap;
@@ -11,14 +13,33 @@ import java.util.Map;
 /**
  * Preferences implementation using wx.setStorageSync/getStorageSync.
  * Forked from WebPreferences, replacing localStorage with WX storage.
+ *
+ * <p>Each value is stored under {@code "pref:" + name + ":" + key + suffix}, where the suffix is its
+ * type: b(oolean), i(nteger), l(ong), f(loat) or s(tring). Every storage call is a synchronous disk
+ * write, so {@link #flush()} only writes keys changed since the last flush and only removes keys
+ * that were removed or whose type changed.
+ *
+ * <p>Storage written by older versions can hold one key under several suffixes. On load the first
+ * suffix in {@link #LOAD_PRIORITY} wins; the others are deleted at the next flush.
+ *
+ * <p>Like libGDX's desktop preferences, which keep every value as a string, a getter whose type
+ * differs from the stored value's parses that value's string form, and returns the default when
+ * it can't be parsed.
  */
 public class MiniGamePreferences implements Preferences {
 
     private static final String ID_FOR_PREF = "pref:";
+    /** Type suffixes in the order that wins when one key is stored under several. */
+    private static final String LOAD_PRIORITY = "sflib";
 
     final String prefix;
     ObjectMap<String, Object> values = new ObjectMap<String, Object>();
-    private final com.badlogic.gdx.utils.Array<String> removedKeys = new com.badlogic.gdx.utils.Array<>();
+    /** Storage key (before encoding) each loaded or flushed key is stored under. */
+    private final ObjectMap<String, String> storedKeys = new ObjectMap<>();
+    private final ObjectSet<String> changedKeys = new ObjectSet<>();
+    private final ObjectSet<String> removedKeys = new ObjectSet<>();
+    /** Storage keys (before encoding) that lost to another type of the same key on load. */
+    private final Array<String> staleStorageKeys = new Array<>();
     private boolean shouldEncode;
 
     public MiniGamePreferences(String prefix, boolean shouldEncode) {
@@ -33,33 +54,49 @@ public class MiniGamePreferences implements Preferences {
                     if(shouldEncode) {
                         key = new String(HEXCoder.decode(keyEncoded));
                     }
-                    boolean flag = key.startsWith(this.prefix);
-                    if(flag) {
-                        String value = WX.getStorageSync(keyEncoded);
-                        String keyStr = key.substring(prefixLength, key.length() - 1);
-                        Object object;
-                        if(shouldEncode) {
-                            object = toObject(key, new String(HEXCoder.decode(value)));
-                        }
-                        else {
-                            object = toObject(key, value);
-                        }
-                        values.put(keyStr, object);
+                    if(!key.startsWith(this.prefix) || key.length() == prefixLength) continue;
+                    char suffix = key.charAt(key.length() - 1);
+                    if(LOAD_PRIORITY.indexOf(suffix) < 0) continue;
+                    String keyStr = key.substring(prefixLength, key.length() - 1);
+                    String loaded = storedKeys.get(keyStr);
+                    if(loaded != null && priority(loaded) < priority(key)) {
+                        staleStorageKeys.add(key);
+                        continue;
                     }
+                    if(loaded != null) staleStorageKeys.add(loaded);
+                    String value = WX.getStorageSync(keyEncoded);
+                    if(shouldEncode) {
+                        value = new String(HEXCoder.decode(value));
+                    }
+                    values.put(keyStr, toObject(suffix, value));
+                    storedKeys.put(keyStr, key);
                 }
             }
         }
         catch(Exception e) {
             e.printStackTrace();
             values.clear();
+            storedKeys.clear();
+            staleStorageKeys.clear();
         }
     }
 
-    private Object toObject(String key, String value) {
-        if(key.endsWith("b")) return Boolean.valueOf(value);
-        if(key.endsWith("i")) return Integer.valueOf(value);
-        if(key.endsWith("l")) return Long.valueOf(value);
-        if(key.endsWith("f")) return Float.valueOf(value);
+    private static int priority(String storageKey) {
+        return LOAD_PRIORITY.indexOf(storageKey.charAt(storageKey.length() - 1));
+    }
+
+    private static Object toObject(char suffix, String value) {
+        try {
+            switch(suffix) {
+                case 'b': return Boolean.valueOf(value);
+                case 'i': return Integer.valueOf(value);
+                case 'l': return Long.valueOf(value);
+                case 'f': return Float.valueOf(value);
+            }
+        }
+        catch(NumberFormatException e) {
+            // Keep the raw text; the getters parse or fall back to their defaults
+        }
         return value;
     }
 
@@ -71,81 +108,74 @@ public class MiniGamePreferences implements Preferences {
         return prefix + key + "s";
     }
 
-    private String typeSuffix(Object value) {
-        if(value instanceof Boolean) return "b";
-        if(value instanceof Integer) return "i";
-        if(value instanceof Long) return "l";
-        if(value instanceof Float) return "f";
-        return "s";
+    private String encode(String text) {
+        return shouldEncode ? HEXCoder.encode(text.getBytes()) : text;
     }
 
     @Override
     public void flush() {
         try {
-            // Remove deleted keys from WX storage
-            for (int i = 0; i < removedKeys.size; i++) {
-                String key = removedKeys.get(i);
-                String[] suffixes = {"b", "i", "l", "f", "s"};
-                for (String suffix : suffixes) {
-                    String storageKey = prefix + key + suffix;
-                    if (shouldEncode) {
-                        storageKey = HEXCoder.encode(storageKey.getBytes());
-                    }
-                    WX.removeStorageSync(storageKey);
-                }
+            for(String key : removedKeys) {
+                String storageKey = storedKeys.remove(key);
+                if(storageKey != null) WX.removeStorageSync(encode(storageKey));
             }
             removedKeys.clear();
-
-            // Write all values to WX storage
-            for(String key : values.keys()) {
+            for(String storageKey : staleStorageKeys) {
+                WX.removeStorageSync(encode(storageKey));
+            }
+            staleStorageKeys.clear();
+            for(String key : changedKeys) {
                 Object val = values.get(key);
                 String storageKey = toStorageKey(key, val);
-                String storageValue = val.toString();
-                if(shouldEncode) {
-                    WX.setStorageSync(HEXCoder.encode(storageKey.getBytes()), HEXCoder.encode(storageValue.getBytes()));
-                } else {
-                    WX.setStorageSync(storageKey, storageValue);
+                String previous = storedKeys.put(key, storageKey);
+                if(previous != null && !previous.equals(storageKey)) {
+                    // The type changed; the old typed key would otherwise come back on load
+                    WX.removeStorageSync(encode(previous));
                 }
+                WX.setStorageSync(encode(storageKey), encode(val.toString()));
             }
+            changedKeys.clear();
         } catch(Exception e) {
             throw new GdxRuntimeException("Couldn't flush preferences", e);
         }
     }
 
+    private Preferences putValue(String key, Object val) {
+        values.put(key, val);
+        changedKeys.add(key);
+        removedKeys.remove(key);
+        return this;
+    }
+
     @Override
     public Preferences putBoolean(String key, boolean val) {
-        values.put(key, val);
-        return this;
+        return putValue(key, val);
     }
 
     @Override
     public Preferences putInteger(String key, int val) {
-        values.put(key, val);
-        return this;
+        return putValue(key, val);
     }
 
     @Override
     public Preferences putLong(String key, long val) {
-        values.put(key, val);
-        return this;
+        return putValue(key, val);
     }
 
     @Override
     public Preferences putFloat(String key, float val) {
-        values.put(key, val);
-        return this;
+        return putValue(key, val);
     }
 
     @Override
     public Preferences putString(String key, String val) {
-        values.put(key, val);
-        return this;
+        return putValue(key, val);
     }
 
     @Override
     public Preferences put(Map<String, ?> vals) {
         for(String key : vals.keySet()) {
-            values.put(key, vals.get(key));
+            putValue(key, vals.get(key));
         }
         return this;
     }
@@ -177,32 +207,58 @@ public class MiniGamePreferences implements Preferences {
 
     @Override
     public boolean getBoolean(String key, boolean defValue) {
-        Boolean res = (Boolean) values.get(key);
-        return res == null ? defValue : res;
+        Object res = values.get(key);
+        if(res instanceof Boolean) return (Boolean) res;
+        if(res == null) return defValue;
+        String text = res.toString();
+        if(text.equalsIgnoreCase("true")) return true;
+        if(text.equalsIgnoreCase("false")) return false;
+        return defValue;
     }
 
     @Override
     public int getInteger(String key, int defValue) {
-        Integer res = (Integer) values.get(key);
-        return res == null ? defValue : res;
+        Object res = values.get(key);
+        if(res instanceof Integer) return (Integer) res;
+        if(res == null) return defValue;
+        try {
+            return Integer.parseInt(res.toString());
+        }
+        catch(NumberFormatException e) {
+            return defValue;
+        }
     }
 
     @Override
     public long getLong(String key, long defValue) {
-        Long res = (Long) values.get(key);
-        return res == null ? defValue : res;
+        Object res = values.get(key);
+        if(res instanceof Long) return (Long) res;
+        if(res == null) return defValue;
+        try {
+            return Long.parseLong(res.toString());
+        }
+        catch(NumberFormatException e) {
+            return defValue;
+        }
     }
 
     @Override
     public float getFloat(String key, float defValue) {
-        Float res = (Float) values.get(key);
-        return res == null ? defValue : res;
+        Object res = values.get(key);
+        if(res instanceof Float) return (Float) res;
+        if(res == null) return defValue;
+        try {
+            return Float.parseFloat(res.toString());
+        }
+        catch(NumberFormatException e) {
+            return defValue;
+        }
     }
 
     @Override
     public String getString(String key, String defValue) {
-        String res = (String) values.get(key);
-        return res == null ? defValue : res;
+        Object res = values.get(key);
+        return res == null ? defValue : res.toString();
     }
 
     @Override
@@ -221,15 +277,17 @@ public class MiniGamePreferences implements Preferences {
 
     @Override
     public void clear() {
-        for (String key : values.keys()) {
+        for(String key : storedKeys.keys()) {
             removedKeys.add(key);
         }
         values.clear();
+        changedKeys.clear();
     }
 
     @Override
     public void remove(String key) {
         values.remove(key);
+        changedKeys.remove(key);
         removedKeys.add(key);
     }
 }
