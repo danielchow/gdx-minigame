@@ -113,6 +113,12 @@ public final class WX {
     @JSBody(params = "callback", script = "wx.onHide(callback);")
     public static native void onHide(OnHideCallback callback);
 
+    @JSBody(params = "callback", script = "if (typeof wx.onAudioInterruptionBegin === 'function') wx.onAudioInterruptionBegin(callback);")
+    public static native void onAudioInterruptionBegin(OnHideCallback callback);
+
+    @JSBody(params = "callback", script = "if (typeof wx.onAudioInterruptionEnd === 'function') wx.onAudioInterruptionEnd(callback);")
+    public static native void onAudioInterruptionEnd(OnHideCallback callback);
+
     // === Dialogs ===
 
     /**

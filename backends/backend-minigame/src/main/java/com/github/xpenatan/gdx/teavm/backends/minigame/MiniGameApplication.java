@@ -145,10 +145,14 @@ public class MiniGameApplication implements Application {
                 }
                 if (curListener != null) curListener.pause();
             }
+            // After the listeners, so music the game pauses itself is not resumed on show
+            audio.onHide();
         });
 
         // Lifecycle: wx.onShow → resume
         WX.onShow((LifecycleCallback) result -> {
+            // Before the listeners, so music they start plays immediately
+            audio.onShow();
             if (initState == AppState.APP_LOOP) {
                 synchronized (lifecycleListeners) {
                     for (LifecycleListener listener : lifecycleListeners) {
@@ -158,6 +162,10 @@ public class MiniGameApplication implements Application {
                 if (curListener != null) curListener.resume();
             }
         });
+
+        // Phone calls, alarms and Siri pause all WeChat audio until the interruption ends
+        WX.onAudioInterruptionBegin((OnHideCallback) () -> audio.onInterruptionBegin());
+        WX.onAudioInterruptionEnd((OnHideCallback) () -> audio.onInterruptionEnd());
 
         // Game loop
         Runnable appLoop = new Runnable() {
