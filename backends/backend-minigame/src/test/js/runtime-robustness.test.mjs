@@ -328,3 +328,12 @@ test('exit leaves the mini game', () => {
     probe.command('exit');
     assert.equal(probe.exits.length, 1);
 });
+
+test('density matches the pixel ratio, as on Android, and ppi follows it', () => {
+    const probe = startProbe();
+    probe.windowInfo.pixelRatio = 3;
+    probe.fire('windowResize', {});
+    assert.equal(probe.command('graphicsDensityTimes100'), 300);
+    assert.equal(probe.command('ppiX'), 480);
+    assert.equal(probe.command('ppiY'), 480);
+});

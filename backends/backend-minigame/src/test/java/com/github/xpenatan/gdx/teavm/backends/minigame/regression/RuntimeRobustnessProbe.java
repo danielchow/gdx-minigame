@@ -136,6 +136,9 @@ public final class RuntimeRobustnessProbe {
                     return 0;
                 }
                 case "exit": Gdx.app.exit(); return 0;
+                case "graphicsDensityTimes100": return Math.round(Gdx.graphics.getDensity() * 100);
+                case "ppiX": return Math.round(Gdx.graphics.getPpiX());
+                case "ppiY": return Math.round(Gdx.graphics.getPpiY());
                 // Reaches WebGL20.glTexImage2D, so the release-logging test sees its code.
                 case "texImage2D":
                     Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, 1, 1, 0, GL20.GL_RGBA,
