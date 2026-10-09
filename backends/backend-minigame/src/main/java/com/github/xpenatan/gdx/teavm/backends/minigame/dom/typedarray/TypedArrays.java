@@ -7,6 +7,7 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
 import org.teavm.classlib.PlatformDetector;
+import org.teavm.jso.JSBody;
 import org.teavm.jso.typedarrays.ArrayBufferView;
 import org.teavm.jso.typedarrays.Float32Array;
 import org.teavm.jso.typedarrays.Int16Array;
@@ -271,4 +272,41 @@ public class TypedArrays {
             out.put(data);
         }
     }
+
+    // GL calls must upload only the elements they are given, as desktop and Android do. The views below
+    // share memory with the Java buffer or array (no copy); getTypedArray alone covers the whole capacity.
+
+    /** The buffer's remaining elements, [position, limit). */
+    public static ArrayBufferView getRemaining(Buffer buffer) {
+        return subarray(getTypedArray(buffer), buffer.position(), buffer.limit());
+    }
+
+    /** {@code length} floats starting at the buffer's position. */
+    public static Float32Array getFloat32Range(FloatBuffer buffer, int length) {
+        return subarray(getFloat32Array(buffer), buffer.position(), buffer.position() + length);
+    }
+
+    /** {@code length} ints starting at the buffer's position. */
+    public static Int32Array getInt32Range(IntBuffer buffer, int length) {
+        return subarray(getInt32Array(buffer), buffer.position(), buffer.position() + length);
+    }
+
+    /** {@code length} floats starting at {@code offset}. */
+    public static Float32Array getFloat32Range(float[] array, int offset, int length) {
+        return subarray(Float32Array.fromJavaArray(array), offset, offset + length);
+    }
+
+    /** {@code length} ints starting at {@code offset}. */
+    public static Int32Array getInt32Range(int[] array, int offset, int length) {
+        return subarray(Int32Array.fromJavaArray(array), offset, offset + length);
+    }
+
+    @JSBody(params = {"array", "begin", "end"}, script = "return array.subarray(begin, end);")
+    private static native ArrayBufferView subarray(ArrayBufferView array, int begin, int end);
+
+    @JSBody(params = {"array", "begin", "end"}, script = "return array.subarray(begin, end);")
+    private static native Float32Array subarray(Float32Array array, int begin, int end);
+
+    @JSBody(params = {"array", "begin", "end"}, script = "return array.subarray(begin, end);")
+    private static native Int32Array subarray(Int32Array array, int begin, int end);
 }

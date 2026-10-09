@@ -146,15 +146,14 @@ public class WebGL20 implements GL20 {
             gl.bufferData(target, size, usage);
         }
         else {
-            ArrayBufferView typedArray = TypedArrays.getTypedArray(data);
-            gl.bufferData(target, typedArray, usage);
+            // Upload [position, limit): the size argument is unreliable (callers pass element counts).
+            gl.bufferData(target, TypedArrays.getRemaining(data), usage);
         }
     }
 
     @Override
     public void glBufferSubData(int target, int offset, int size, Buffer data) {
-        ArrayBufferView typedArray = TypedArrays.getTypedArray(data);
-        gl.bufferSubData(target, offset, typedArray);
+        gl.bufferSubData(target, offset, TypedArrays.getRemaining(data));
     }
 
     @Override
@@ -885,13 +884,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform1fv(int location, int count, FloatBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform1fv(loc, TypedArrays.getFloat32Array(v));
+        gl.uniform1fv(loc, TypedArrays.getFloat32Range(v, count));
     }
 
     @Override
     public void glUniform1fv(int location, int count, float[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform1fv(loc, v);
+        gl.uniform1fv(loc, TypedArrays.getFloat32Range(v, offset, count));
     }
 
     @Override
@@ -903,13 +902,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform1iv(int location, int count, IntBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform1iv(loc, TypedArrays.getInt32Array(v));
+        gl.uniform1iv(loc, TypedArrays.getInt32Range(v, count));
     }
 
     @Override
     public void glUniform1iv(int location, int count, int[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform1iv(loc, v);
+        gl.uniform1iv(loc, TypedArrays.getInt32Range(v, offset, count));
     }
 
     @Override
@@ -921,13 +920,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform2fv(int location, int count, FloatBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform2fv(loc, TypedArrays.getFloat32Array(v));
+        gl.uniform2fv(loc, TypedArrays.getFloat32Range(v, count * 2));
     }
 
     @Override
     public void glUniform2fv(int location, int count, float[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform2fv(loc, v);
+        gl.uniform2fv(loc, TypedArrays.getFloat32Range(v, offset, count * 2));
     }
 
     @Override
@@ -939,13 +938,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform2iv(int location, int count, IntBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform2iv(loc, TypedArrays.getInt32Array(v));
+        gl.uniform2iv(loc, TypedArrays.getInt32Range(v, count * 2));
     }
 
     @Override
     public void glUniform2iv(int location, int count, int[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform2iv(loc, v);
+        gl.uniform2iv(loc, TypedArrays.getInt32Range(v, offset, count * 2));
     }
 
     @Override
@@ -957,13 +956,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform3fv(int location, int count, FloatBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform3fv(loc, TypedArrays.getFloat32Array(v));
+        gl.uniform3fv(loc, TypedArrays.getFloat32Range(v, count * 3));
     }
 
     @Override
     public void glUniform3fv(int location, int count, float[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform3fv(loc, v);
+        gl.uniform3fv(loc, TypedArrays.getFloat32Range(v, offset, count * 3));
     }
 
     @Override
@@ -975,13 +974,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform3iv(int location, int count, IntBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform3iv(loc, TypedArrays.getInt32Array(v));
+        gl.uniform3iv(loc, TypedArrays.getInt32Range(v, count * 3));
     }
 
     @Override
     public void glUniform3iv(int location, int count, int[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform3iv(loc, v);
+        gl.uniform3iv(loc, TypedArrays.getInt32Range(v, offset, count * 3));
     }
 
     @Override
@@ -993,13 +992,13 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform4fv(int location, int count, FloatBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform4fv(loc, TypedArrays.getFloat32Array(v));
+        gl.uniform4fv(loc, TypedArrays.getFloat32Range(v, count * 4));
     }
 
     @Override
     public void glUniform4fv(int location, int count, float[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform4fv(loc, v);
+        gl.uniform4fv(loc, TypedArrays.getFloat32Range(v, offset, count * 4));
     }
 
     @Override
@@ -1011,49 +1010,49 @@ public class WebGL20 implements GL20 {
     @Override
     public void glUniform4iv(int location, int count, IntBuffer v) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform4iv(loc, TypedArrays.getInt32Array(v));
+        gl.uniform4iv(loc, TypedArrays.getInt32Range(v, count * 4));
     }
 
     @Override
     public void glUniform4iv(int location, int count, int[] v, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniform4iv(loc, v);
+        gl.uniform4iv(loc, TypedArrays.getInt32Range(v, offset, count * 4));
     }
 
     @Override
     public void glUniformMatrix2fv(int location, int count, boolean transpose, FloatBuffer value) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix2fv(loc, transpose, TypedArrays.getFloat32Array(value));
+        gl.uniformMatrix2fv(loc, transpose, TypedArrays.getFloat32Range(value, count * 4));
     }
 
     @Override
     public void glUniformMatrix2fv(int location, int count, boolean transpose, float[] value, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix2fv(loc, transpose, value);
+        gl.uniformMatrix2fv(loc, transpose, TypedArrays.getFloat32Range(value, offset, count * 4));
     }
 
     @Override
     public void glUniformMatrix3fv(int location, int count, boolean transpose, FloatBuffer value) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix3fv(loc, transpose, TypedArrays.getFloat32Array(value));
+        gl.uniformMatrix3fv(loc, transpose, TypedArrays.getFloat32Range(value, count * 9));
     }
 
     @Override
     public void glUniformMatrix3fv(int location, int count, boolean transpose, float[] value, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix3fv(loc, transpose, value);
+        gl.uniformMatrix3fv(loc, transpose, TypedArrays.getFloat32Range(value, offset, count * 9));
     }
 
     @Override
     public void glUniformMatrix4fv(int location, int count, boolean transpose, FloatBuffer value) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix4fv(loc, transpose, TypedArrays.getFloat32Array(value));
+        gl.uniformMatrix4fv(loc, transpose, TypedArrays.getFloat32Range(value, count * 16));
     }
 
     @Override
     public void glUniformMatrix4fv(int location, int count, boolean transpose, float[] value, int offset) {
         WebGLUniformLocation loc = getUniformLocation(location);
-        gl.uniformMatrix4fv(loc, transpose, value);
+        gl.uniformMatrix4fv(loc, transpose, TypedArrays.getFloat32Range(value, offset, count * 16));
     }
 
     @Override
@@ -1074,7 +1073,7 @@ public class WebGL20 implements GL20 {
 
     @Override
     public void glVertexAttrib1fv(int indx, FloatBuffer values) {
-        gl.vertexAttrib1fv(indx, TypedArrays.getFloat32Array(values));
+        gl.vertexAttrib1fv(indx, TypedArrays.getFloat32Range(values, 1));
     }
 
     @Override
@@ -1084,7 +1083,7 @@ public class WebGL20 implements GL20 {
 
     @Override
     public void glVertexAttrib2fv(int indx, FloatBuffer values) {
-        gl.vertexAttrib2fv(indx, TypedArrays.getFloat32Array(values));
+        gl.vertexAttrib2fv(indx, TypedArrays.getFloat32Range(values, 2));
     }
 
     @Override
@@ -1094,7 +1093,7 @@ public class WebGL20 implements GL20 {
 
     @Override
     public void glVertexAttrib3fv(int indx, FloatBuffer values) {
-        gl.vertexAttrib3fv(indx, TypedArrays.getFloat32Array(values));
+        gl.vertexAttrib3fv(indx, TypedArrays.getFloat32Range(values, 3));
     }
 
     @Override
@@ -1104,7 +1103,7 @@ public class WebGL20 implements GL20 {
 
     @Override
     public void glVertexAttrib4fv(int indx, FloatBuffer values) {
-        gl.vertexAttrib4fv(indx, TypedArrays.getFloat32Array(values));
+        gl.vertexAttrib4fv(indx, TypedArrays.getFloat32Range(values, 4));
     }
 
     @Override
