@@ -590,6 +590,8 @@ public class FreeType {
             if (color == Color.WHITE && pixelMode == FT_PIXEL_MODE_GRAY && rowBytes == width && gamma == 1) {
                 pixmap = new Pixmap(width, rows, Pixmap.Format.Alpha);
                 BufferUtils.copy(src, pixmap.getPixels(), pixmap.getPixels().capacity());
+                // Packing and drawing read the native pixmap, not the Java buffer.
+                ((PixmapNativeInterface)pixmap).getNative().copyToHeap();
             } else {
                 pixmap = new Pixmap(width, rows, Pixmap.Format.RGBA8888);
                 int rgba = Color.rgba8888(color);
