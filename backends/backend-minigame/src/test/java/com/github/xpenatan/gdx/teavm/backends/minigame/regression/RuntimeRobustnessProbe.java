@@ -70,6 +70,7 @@ public final class RuntimeRobustnessProbe {
 
         MiniGameAudio audio = (MiniGameAudio) app.getAudio();
         MiniGameSound sound = audio.newSound(new FileHandle("effect.mp3"));
+        MiniGameSound otherSound = audio.newSound(new FileHandle("other.mp3"));
         MiniGameMusic[] music = new MiniGameMusic[3];
         for (int i = 0; i < music.length; i++) music[i] = audio.newMusic(new FileHandle("music" + i + ".mp3"));
 
@@ -77,6 +78,7 @@ public final class RuntimeRobustnessProbe {
             switch (command) {
                 case "playSound": return (int) sound.play();
                 case "loopSound": return (int) sound.loop();
+                case "playOtherSound": return (int) otherSound.play();
                 case "pauseSound": sound.pause(arg); return 0;
                 case "resumeSound": sound.resume(arg); return 0;
                 case "stopSound": sound.stop(arg); return 0;

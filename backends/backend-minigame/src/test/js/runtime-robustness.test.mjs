@@ -6,14 +6,21 @@ import {typedArrays} from './engine.mjs';
 
 const app = new URL('../../../build/regression-probes/runtime-robustness/minigame/subpackages/game/app.js', import.meta.url);
 
-/** InnerAudioContext that, like WeChat's, adds a listener on every on*() call. */
+/**
+ * InnerAudioContext that, like WeChat's, adds a listener on every on*() call. Assigning src
+ * makes WeChat load the audio again, so the mock counts assignments.
+ */
 class MockAudioContext {
-    constructor() {
+    constructor(options) {
+        this.options = options;
+        this.srcAssignments = 0;
         this.ended = [];
         this.errors = [];
         this.state = 'idle';
         this.destroyed = false;
     }
+    get src() {return this.currentSrc;}
+    set src(value) {this.currentSrc = value; this.srcAssignments++;}
     onEnded(listener) {this.ended.push(listener);}
     offEnded(listener) {this.ended = listener ? this.ended.filter(l => l !== listener) : [];}
     onError(listener) {this.errors.push(listener);}
@@ -53,8 +60,8 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
         env: {USER_DATA_PATH: 'wxfile://usr'},
         getStorageSync: () => '',
         getStorageInfoSync: () => ({keys: []}),
-        createInnerAudioContext() {
-            const context = new MockAudioContext();
+        createInnerAudioContext(options) {
+            const context = new MockAudioContext(options);
             contexts.push(context);
             return context;
         },
@@ -253,4 +260,39 @@ test('startup, frames, sounds and texture uploads log no progress or timing', ()
     probe.runFrames();
     // TeaVM prints System.out as console.info; warnings and errors stay allowed.
     assert.deepEqual(calls.filter(method => ['log', 'info', 'debug'].includes(method)), []);
+});
+
+test('sound contexts use the WebAudio implementation and music keeps the default', () => {
+    const probe = startProbe();
+    probe.command('playSound');
+    probe.command('playMusic', 0);
+    assert.equal(soundContexts(probe)[0].options?.useWebAudioImplement, true);
+    assert.equal(musicContext(probe, 0).options?.useWebAudioImplement, undefined);
+});
+
+test('a reused sound context is not given its source again', () => {
+    const probe = startProbe();
+    for (let i = 0; i < 5; i++) {
+        probe.command('playSound');
+        soundContexts(probe)[0].end();
+    }
+    const [context] = soundContexts(probe);
+    assert.equal(soundContexts(probe).length, 1);
+    assert.equal(context.srcAssignments, 1, 'replaying the same sound does not reload it');
+    assert.equal(context.state, 'stopped');
+
+    probe.command('playOtherSound');
+    assert.equal(context.src, 'assets/other.mp3', 'another sound still switches the source');
+    assert.equal(context.state, 'playing');
+    context.end();
+    probe.command('playSound');
+    assert.equal(context.src, 'assets/effect.mp3');
+    assert.equal(context.srcAssignments, 3);
+
+    // After a load error the source is set again, so the next play retries the load.
+    for (const listener of [...context.errors]) listener({errMsg: 'decode failed'});
+    assert.equal(soundContexts(probe).filter(c => c.state === 'playing').length, 0);
+    probe.command('playSound');
+    assert.equal(context.srcAssignments, 4);
+    assert.equal(context.state, 'playing');
 });

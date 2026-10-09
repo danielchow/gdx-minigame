@@ -7,7 +7,6 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.IntMap;
-import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.AudioCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WXAudioContext;
 
@@ -16,8 +15,8 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WXAudioContext;
  * No Howler.js dependency — WeChat has native MP3 support.
  *
  * Uses a pool of audio contexts to stay within WeChat's ~10 concurrent
- * InnerAudioContext limit. Short sound effects share contexts from the pool,
- * while music tracks keep dedicated (unpooled) contexts.
+ * InnerAudioContext limit. Short sound effects share contexts from the pool, which use the
+ * WebAudio implementation, while music tracks keep dedicated (unpooled) default contexts.
  */
 public class MiniGameAudio implements Audio {
 
@@ -46,12 +45,23 @@ public class MiniGameAudio implements Audio {
         int soundId;
         /** Paused by the game; such a voice is not resumed when audio suspension ends. */
         boolean paused;
+        /** The source last assigned to ctx; assigning src reloads the audio even when unchanged. */
+        String src;
 
         Voice() {
-            ctx = WX.createInnerAudioContext();
-            AudioCallback finished = () -> finished(this);
-            ctx.onEnded(finished);
-            ctx.onError(finished);
+            ctx = WX.createInnerAudioContext(true);
+            ctx.onEnded(() -> finished(this));
+            ctx.onError(() -> {
+                // Assign the source again on the next play, so a failed load is retried
+                src = null;
+                finished(this);
+            });
+        }
+
+        void setSrc(String src) {
+            if (src.equals(this.src)) return;
+            ctx.setSrc(src);
+            this.src = src;
         }
     }
 
@@ -207,8 +217,8 @@ public class MiniGameAudio implements Audio {
      * Sound implementation — short audio effects using a pooled audio context approach.
      *
      * Instead of one context per Sound (which exhausts WeChat's ~10 context limit),
-     * each {@code play()} call acquires a voice from the shared pool, sets its src,
-     * plays it, and the voice's onEnded listener returns it to the pool when done.
+     * each {@code play()} call acquires a voice from the shared pool, sets its src
+     * if it holds another sound, plays it, and the voice's onEnded listener returns it to the pool when done.
      */
     public static class MiniGameSound implements com.badlogic.gdx.audio.Sound {
         private static long nextId = 1;
@@ -267,8 +277,8 @@ public class MiniGameAudio implements Audio {
             long id = nextId++;
             final int soundId = (int) id;
             Voice voice = audio.acquire(this, soundId);
+            voice.setSrc(src);
             WXAudioContext ctx = voice.ctx;
-            ctx.setSrc(src);
             ctx.setVolume(vol);
             ctx.setLoop(looping);
             ctx.setCurrentTime(0);

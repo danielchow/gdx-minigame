@@ -85,6 +85,13 @@ public final class WX {
     @JSBody(script = "return wx.createInnerAudioContext();")
     public static native WXAudioContext createInnerAudioContext();
 
+    /**
+     * WeChat recommends the WebAudio implementation for short, frequently played audio; it
+     * costs more memory, so long audio such as music should keep the default.
+     */
+    @JSBody(params = "useWebAudioImplement", script = "return wx.createInnerAudioContext({useWebAudioImplement: useWebAudioImplement});")
+    public static native WXAudioContext createInnerAudioContext(boolean useWebAudioImplement);
+
     // === Storage ===
 
     @JSBody(params = {"key", "value"}, script = "wx.setStorageSync(key, value);")
