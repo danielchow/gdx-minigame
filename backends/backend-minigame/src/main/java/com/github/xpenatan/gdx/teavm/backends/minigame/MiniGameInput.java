@@ -60,7 +60,7 @@ public class MiniGameInput extends AbstractInput {
         WX.onTouchStart((TouchCallback) event -> handleTouchEvent(event, 0));
         WX.onTouchMove((TouchCallback) event -> handleTouchEvent(event, 1));
         WX.onTouchEnd((TouchCallback) event -> handleTouchEvent(event, 2));
-        WX.onTouchCancel((TouchCallback) event -> handleTouchEvent(event, 2));
+        WX.onTouchCancel((TouchCallback) event -> handleTouchEvent(event, 3));
     }
 
     @JSBody(params = "event", script = "return event.changedTouches;")
@@ -107,7 +107,7 @@ public class MiniGameInput extends AbstractInput {
                     if (processor != null) processor.touchDragged(x, y, touchId);
                 }
             }
-            else { // TOUCH_UP / TOUCH_CANCEL
+            else { // TOUCH_UP (2) / TOUCH_CANCEL (3)
                 Integer touchIdObj = touchMap.get(real);
                 if (touchIdObj != null) {
                     int touchId = touchIdObj;
@@ -117,7 +117,11 @@ public class MiniGameInput extends AbstractInput {
                     deltaY[touchId] = y - touchY[touchId];
                     touchX[touchId] = x;
                     touchY[touchId] = y;
-                    if (processor != null) processor.touchUp(x, y, touchId, Input.Buttons.LEFT);
+                    if (processor != null) {
+                        // A cancelled touch (system gesture, incoming call) is not a tap
+                        if (type == 3) processor.touchCancelled(x, y, touchId, Input.Buttons.LEFT);
+                        else processor.touchUp(x, y, touchId, Input.Buttons.LEFT);
+                    }
                     if (touchId == 0) {
                         boolean anyTouched = false;
                         for (int j = 0; j < MAX_TOUCHES; j++) if (touched[j]) { anyTouched = true; break; }

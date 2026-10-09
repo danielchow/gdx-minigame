@@ -45,11 +45,29 @@ public interface WXAudioContext extends JSObject {
     @JSMethod
     void seek(double position);
 
+    /** Adds a listener; WeChat keeps every listener added until it is removed with offEnded. */
     @JSMethod
     void onEnded(AudioCallback callback);
 
+    /** Removes a listener added with onEnded; it must be the same function object. */
+    @JSMethod
+    void offEnded(AudioCallback callback);
+
+    /** Removes every onEnded listener. */
+    @JSMethod
+    void offEnded();
+
+    /** Adds a listener; WeChat keeps every listener added until it is removed with offError. */
     @JSMethod
     void onError(AudioCallback callback);
+
+    /** Removes a listener added with onError; it must be the same function object. */
+    @JSMethod
+    void offError(AudioCallback callback);
+
+    /** Removes every onError listener. */
+    @JSMethod
+    void offError();
 
     @JSMethod
     void onStop(AudioCallback callback);

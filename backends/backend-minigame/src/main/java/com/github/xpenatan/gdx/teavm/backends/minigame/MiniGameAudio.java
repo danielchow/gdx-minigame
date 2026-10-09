@@ -7,7 +7,7 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.IntMap;
-import com.badlogic.gdx.utils.ObjectMap;
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.AudioCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WXAudioContext;
 
@@ -23,80 +23,149 @@ public class MiniGameAudio implements Audio {
 
     private static final int MAX_POOL_SIZE = 10;
 
-    /** Idle contexts ready for reuse. */
-    private final Array<WXAudioContext> pool = new Array<>();
+    /** Idle voices ready for reuse. */
+    private final Array<Voice> pool = new Array<>();
 
-    /** Contexts currently playing (acquired but not yet released), in FIFO order for stealing. */
-    private final Array<WXAudioContext> active = new Array<>();
+    /** Voices currently owned by a playback (playing or paused), in FIFO order for stealing. */
+    private final Array<Voice> active = new Array<>();
+
+    /** Music instances that have not been disposed, for suspend and resume. */
+    private final Array<MiniGameMusic> musics = new Array<>();
+
+    private boolean hidden;
+    private boolean interrupted;
 
     /**
-     * Maps each active context to a steal-cleanup callback.
-     * When a context is stolen (pool exhausted), the callback removes the
-     * stale entry from the previous owner's activePlaybacks map.
+     * A pooled context and the sound playback that currently owns it. WeChat's onEnded and
+     * onError add a listener on every call, so each context gets exactly one of each when it is
+     * created, and they dispatch to the current owner instead of being registered per play.
      */
-    private final ObjectMap<WXAudioContext, Runnable> stealCallbacks = new ObjectMap<>();
+    private final class Voice {
+        final WXAudioContext ctx;
+        MiniGameSound owner;
+        int soundId;
+        /** Paused by the game; such a voice is not resumed when audio suspension ends. */
+        boolean paused;
 
-    /**
-     * Acquire a context from the pool (or create a new one if under the limit).
-     * If the pool is empty and we've hit the limit, steal the oldest active context.
-     */
-    private WXAudioContext acquire() {
-        if (pool.size > 0) {
-            return pool.pop();
+        Voice() {
+            ctx = WX.createInnerAudioContext();
+            AudioCallback finished = () -> finished(this);
+            ctx.onEnded(finished);
+            ctx.onError(finished);
         }
-        if (active.size < MAX_POOL_SIZE) {
-            return WX.createInnerAudioContext();
-        }
-        // Steal the oldest active context — notify its previous owner
-        WXAudioContext stolen = active.removeIndex(0);
-        Runnable cleanup = stealCallbacks.remove(stolen);
-        if (cleanup != null) {
-            cleanup.run();
-        }
-        stolen.stop();
-        stolen.setCurrentTime(0);
-        return stolen;
     }
 
     /**
-     * Return a context to the pool after playback finishes.
+     * Acquire a voice from the pool (or create a new one if under the limit).
+     * If the pool is empty and we've hit the limit, steal the oldest active voice.
      */
-    private void release(WXAudioContext ctx) {
-        // Clear the onEnded callback to prevent stale fires after manual stop
-        ctx.onEnded(() -> {});
-        ctx.stop();
-        ctx.setCurrentTime(0);
-        active.removeValue(ctx, true);
-        stealCallbacks.remove(ctx);
+    private Voice acquire(MiniGameSound owner, int soundId) {
+        Voice voice;
+        if (pool.size > 0) {
+            voice = pool.pop();
+        } else if (active.size < MAX_POOL_SIZE) {
+            voice = new Voice();
+        } else {
+            // Steal the oldest active voice and detach it from its previous owner
+            voice = active.removeIndex(0);
+            voice.owner.activePlaybacks.remove(voice.soundId);
+            voice.ctx.stop();
+            voice.ctx.setCurrentTime(0);
+        }
+        voice.owner = owner;
+        voice.soundId = soundId;
+        voice.paused = false;
+        active.add(voice);
+        return voice;
+    }
+
+    private void finished(Voice voice) {
+        // Ignore a late event for a voice that was already stopped and returned to the pool
+        if (voice.owner == null) return;
+        voice.owner.activePlaybacks.remove(voice.soundId);
+        release(voice);
+    }
+
+    /**
+     * Return a voice to the pool after its playback finished or was stopped.
+     */
+    private void release(Voice voice) {
+        voice.owner = null;
+        voice.ctx.stop();
+        voice.ctx.setCurrentTime(0);
+        active.removeValue(voice, true);
         // Guard against double-release: don't re-add if already in pool
-        if (pool.contains(ctx, true)) {
+        if (pool.contains(voice, true)) {
             return;
         }
         if (pool.size < MAX_POOL_SIZE) {
-            pool.add(ctx);
+            pool.add(voice);
         } else {
-            ctx.destroy();
+            voice.ctx.offEnded();
+            voice.ctx.offError();
+            voice.ctx.destroy();
         }
     }
 
-    /**
-     * Track an active context so it can be stolen if the pool is exhausted.
-     * @param ctx the context to track
-     * @param onSteal cleanup callback to invoke if this context is stolen from its owner
-     */
-    private void trackActive(WXAudioContext ctx, Runnable onSteal) {
-        if (!active.contains(ctx, true)) {
-            active.add(ctx);
-        }
-        stealCallbacks.put(ctx, onSteal);
+    /** True while the mini game is hidden or the system has interrupted audio. */
+    public boolean isSuspended() {
+        return hidden || interrupted;
+    }
+
+    /** Called on wx.onHide: pauses playing sounds and music until {@link #onShow()}. */
+    public void onHide() {
+        boolean wasSuspended = isSuspended();
+        hidden = true;
+        if (!wasSuspended) pauseForSuspend();
     }
 
     /**
-     * Remove a context from the active tracking list.
+     * Called on wx.onShow. A visible game should have sound, so this also ends an interruption
+     * whose end event was missed; while it really lasts, WeChat rejects the play() calls anyway.
      */
-    private void untrackActive(WXAudioContext ctx) {
-        active.removeValue(ctx, true);
-        stealCallbacks.remove(ctx);
+    public void onShow() {
+        boolean wasSuspended = isSuspended();
+        hidden = false;
+        interrupted = false;
+        if (wasSuspended) resumeAfterSuspend();
+    }
+
+    /** Called on wx.onAudioInterruptionBegin (phone call, alarm, Siri, ...). */
+    public void onInterruptionBegin() {
+        boolean wasSuspended = isSuspended();
+        interrupted = true;
+        if (!wasSuspended) pauseForSuspend();
+    }
+
+    /** Called on wx.onAudioInterruptionEnd. */
+    public void onInterruptionEnd() {
+        boolean wasSuspended = isSuspended();
+        interrupted = false;
+        if (wasSuspended && !isSuspended()) resumeAfterSuspend();
+    }
+
+    // Only what the game considers playing is paused and later resumed, so anything the game
+    // paused itself, before or during the suspension, stays paused.
+    private void pauseForSuspend() {
+        for (int i = 0; i < active.size; i++) {
+            Voice voice = active.get(i);
+            if (!voice.paused) voice.ctx.pause();
+        }
+        for (int i = 0; i < musics.size; i++) {
+            MiniGameMusic music = musics.get(i);
+            if (music.isPlaying) music.audioContext.pause();
+        }
+    }
+
+    private void resumeAfterSuspend() {
+        for (int i = 0; i < active.size; i++) {
+            Voice voice = active.get(i);
+            if (!voice.paused) voice.ctx.play();
+        }
+        for (int i = 0; i < musics.size; i++) {
+            MiniGameMusic music = musics.get(i);
+            if (music.isPlaying) music.audioContext.play();
+        }
     }
 
     private static String toAssetPath(String path) {
@@ -111,7 +180,7 @@ public class MiniGameAudio implements Audio {
 
     @Override
     public MiniGameMusic newMusic(FileHandle fileHandle) {
-        return new MiniGameMusic(fileHandle);
+        return new MiniGameMusic(this, fileHandle);
     }
 
     @Override
@@ -138,8 +207,8 @@ public class MiniGameAudio implements Audio {
      * Sound implementation — short audio effects using a pooled audio context approach.
      *
      * Instead of one context per Sound (which exhausts WeChat's ~10 context limit),
-     * each {@code play()} call acquires a context from the shared pool, sets its src,
-     * plays it, and returns the context when done via the onEnded callback.
+     * each {@code play()} call acquires a voice from the shared pool, sets its src,
+     * plays it, and the voice's onEnded listener returns it to the pool when done.
      */
     public static class MiniGameSound implements com.badlogic.gdx.audio.Sound {
         private static long nextId = 1;
@@ -151,8 +220,8 @@ public class MiniGameAudio implements Audio {
         private float pan = 0.0f;
         private boolean disposed = false;
 
-        /** Maps soundId → active context for per-playback control. */
-        private final IntMap<WXAudioContext> activePlaybacks = new IntMap<>();
+        /** Maps soundId → active voice for per-playback control. */
+        private final IntMap<Voice> activePlaybacks = new IntMap<>();
 
         public MiniGameSound(MiniGameAudio audio, String src) {
             this.audio = audio;
@@ -191,86 +260,86 @@ public class MiniGameAudio implements Audio {
 
         private long startPlayback(float vol, boolean looping) {
             if (disposed) return -1;
+            // A one-shot effect played while suspended would only start, out of context, when
+            // the game returns; a loop is kept and starts with the rest of the audio.
+            if (!looping && audio.isSuspended()) return -1;
 
-            WXAudioContext ctx = audio.acquire();
+            long id = nextId++;
+            final int soundId = (int) id;
+            Voice voice = audio.acquire(this, soundId);
+            WXAudioContext ctx = voice.ctx;
             ctx.setSrc(src);
             ctx.setVolume(vol);
             ctx.setLoop(looping);
             ctx.setCurrentTime(0);
+            activePlaybacks.put(soundId, voice);
 
-            long id = nextId++;
-            final int soundId = (int) id;
-            activePlaybacks.put(soundId, ctx);
-
-            // Register a steal callback so the stale entry is removed if
-            // this context is reclaimed for a new playback
-            audio.trackActive(ctx, () -> activePlaybacks.remove(soundId));
-
-            ctx.onEnded(() -> {
-                activePlaybacks.remove(soundId);
-                audio.untrackActive(ctx);
-                audio.release(ctx);
-            });
-
-            ctx.play();
+            if (!audio.isSuspended()) ctx.play();
             return id;
         }
 
         @Override
         public void stop() {
             // Stop all active playbacks for this sound
-            for (IntMap.Entry<WXAudioContext> entry : activePlaybacks.entries()) {
-                WXAudioContext ctx = entry.value;
-                audio.untrackActive(ctx);
-                audio.release(ctx);
+            for (IntMap.Entry<Voice> entry : activePlaybacks.entries()) {
+                audio.release(entry.value);
             }
             activePlaybacks.clear();
         }
 
         @Override
         public void stop(long soundId) {
-            WXAudioContext ctx = activePlaybacks.remove((int) soundId);
-            if (ctx != null) {
-                audio.untrackActive(ctx);
-                audio.release(ctx);
+            Voice voice = activePlaybacks.remove((int) soundId);
+            if (voice != null) {
+                audio.release(voice);
             }
         }
 
         @Override
         public void pause() {
-            for (IntMap.Entry<WXAudioContext> entry : activePlaybacks.entries()) {
-                entry.value.pause();
+            for (IntMap.Entry<Voice> entry : activePlaybacks.entries()) {
+                pause(entry.value);
             }
         }
 
         @Override
         public void resume() {
-            for (IntMap.Entry<WXAudioContext> entry : activePlaybacks.entries()) {
-                entry.value.play();
+            for (IntMap.Entry<Voice> entry : activePlaybacks.entries()) {
+                resume(entry.value);
             }
         }
 
         @Override
         public void pause(long soundId) {
-            WXAudioContext ctx = activePlaybacks.get((int) soundId);
-            if (ctx != null) {
-                ctx.pause();
+            Voice voice = activePlaybacks.get((int) soundId);
+            if (voice != null) {
+                pause(voice);
             }
         }
 
         @Override
         public void resume(long soundId) {
-            WXAudioContext ctx = activePlaybacks.get((int) soundId);
-            if (ctx != null) {
-                ctx.play();
+            Voice voice = activePlaybacks.get((int) soundId);
+            if (voice != null) {
+                resume(voice);
             }
+        }
+
+        private void pause(Voice voice) {
+            voice.paused = true;
+            voice.ctx.pause();
+        }
+
+        private void resume(Voice voice) {
+            voice.paused = false;
+            if (!audio.isSuspended()) voice.ctx.play();
         }
 
         @Override
         public void setVolume(long soundId, float volume) {
-            WXAudioContext ctx = activePlaybacks.get((int) soundId);
-            if (ctx != null) {
-                ctx.setVolume(volume);
+            Voice voice = activePlaybacks.get((int) soundId);
+            if (voice != null) {
+                voice.ctx.setVolume(volume);
             }
         }
 
@@ -281,17 +350,17 @@ public class MiniGameAudio implements Audio {
 
         @Override
         public void setPan(long soundId, float pan, float volume) {
-            WXAudioContext ctx = activePlaybacks.get((int) soundId);
-            if (ctx != null) {
-                ctx.setVolume(volume);
+            Voice voice = activePlaybacks.get((int) soundId);
+            if (voice != null) {
+                voice.ctx.setVolume(volume);
             }
         }
 
         @Override
         public void setLooping(long soundId, boolean looping) {
-            WXAudioContext ctx = activePlaybacks.get((int) soundId);
-            if (ctx != null) {
-                ctx.setLoop(looping);
+            Voice voice = activePlaybacks.get((int) soundId);
+            if (voice != null) {
+                voice.ctx.setLoop(looping);
             }
         }
 
@@ -308,12 +377,15 @@ public class MiniGameAudio implements Audio {
      * 1 Music instance playing at a time.
      */
     public static class MiniGameMusic implements com.badlogic.gdx.audio.Music {
+        private final MiniGameAudio audio;
         private final WXAudioContext audioContext;
         private OnCompletionListener completionListener;
+        /** Whether the game wants this music playing; it stays true while audio is suspended. */
         private boolean isPlaying = false;
         private float volume = 1.0f;
 
-        public MiniGameMusic(FileHandle fileHandle) {
+        public MiniGameMusic(MiniGameAudio audio, FileHandle fileHandle) {
+            this.audio = audio;
             audioContext = WX.createInnerAudioContext();
             audioContext.setSrc(toAssetPath(fileHandle.path()));
             audioContext.setVolume(volume);
@@ -328,11 +400,12 @@ public class MiniGameAudio implements Audio {
             audioContext.onError(() -> {
                 isPlaying = false;
             });
+            audio.musics.add(this);
         }
 
         @Override
         public void play() {
-            audioContext.play();
+            if (!audio.isSuspended()) audioContext.play();
             isPlaying = true;
         }
 
@@ -391,6 +464,8 @@ public class MiniGameAudio implements Audio {
 
         @Override
         public void dispose() {
+            audio.musics.removeValue(this, true);
+            isPlaying = false;
             audioContext.destroy();
         }
 

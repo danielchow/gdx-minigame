@@ -27,28 +27,112 @@ firstScreen.start(canvas);
 __perfMark('canvas_ready');
 console.log('[game.js] Canvas created and splash drawn', canvas.width, 'x', canvas.height);
 
-// Helper: load subpackage with error handling
+// === Startup failure handling ===
+// Every startup failure must end in a dialog: a silent failure leaves the player on the splash.
+// Download failures retry the failed wx.loadSubpackage in place. Failures after engine or game
+// code has run cannot be retried in place, so their dialog restarts the mini game instead.
+var STARTUP_STALL_TIMEOUT_MS = 30000;
+var startupFinished = false;
+var fatalShown = false;
+var startupWatchdog = null;
+var modalOpen = false;
+var pendingRetries = [];
+
+function restartGame() {
+    if (typeof wx.restartMiniProgram === 'function') {
+        wx.restartMiniProgram({
+            fail: function(err) {
+                console.error('[game.js] restartMiniProgram failed:', err && err.errMsg);
+                if (typeof wx.exitMiniProgram === 'function') wx.exitMiniProgram({});
+            }
+        });
+    } else if (typeof wx.exitMiniProgram === 'function') {
+        wx.exitMiniProgram({});
+    }
+}
+
+// Several downloads can fail together; one dialog collects them and retries all on confirm.
+function showStartupFailure(content, retry) {
+    pendingRetries.push(retry);
+    if (modalOpen) return;
+    modalOpen = true;
+    stopWatchdog();
+    wx.showModal({
+        title: '提示',
+        content: content,
+        showCancel: false,
+        confirmText: '重试',
+        complete: function() {
+            modalOpen = false;
+            var retries = pendingRetries;
+            pendingRetries = [];
+            kickWatchdog();
+            for (var i = 0; i < retries.length; i++) retries[i]();
+        }
+    });
+}
+
+function failStartup(reason, err) {
+    if (fatalShown) return;
+    fatalShown = true;
+    startupFinished = true;
+    console.error('[game.js] Startup failed (' + reason + '):', err);
+    showStartupFailure('游戏启动失败，请重新进入游戏', restartGame);
+}
+
+// Restarted on every sign of progress, so a slow download does not trip it but a promise that
+// never settles (for example a WASM instantiation that never reports back) still ends in a dialog.
+function kickWatchdog() {
+    stopWatchdog();
+    if (startupFinished || modalOpen) return;
+    startupWatchdog = setTimeout(function() {
+        startupWatchdog = null;
+        failStartup('timeout', 'no startup progress for ' + STARTUP_STALL_TIMEOUT_MS + 'ms');
+    }, STARTUP_STALL_TIMEOUT_MS);
+}
+
+function stopWatchdog() {
+    if (startupWatchdog !== null) {
+        clearTimeout(startupWatchdog);
+        startupWatchdog = null;
+    }
+}
+
+// gdx.wasm.js assigns window.Gdx from an un-awaited promise, so a failed WASM instantiation
+// surfaces only as an unhandled rejection (not dispatched on Android; the watchdog covers that).
+function onStartupRejection(res) {
+    if (!startupFinished) failStartup('unhandled rejection', res && res.reason);
+}
+if (typeof wx.onUnhandledRejection === 'function') wx.onUnhandledRejection(onStartupRejection);
+
+// Helper: load a subpackage; on failure, ask the player to retry and load it again.
 function loadSubpackage(name) {
     if (typeof wx.loadSubpackage !== 'function') {
         console.log('[game.js] wx.loadSubpackage not available, skipping ' + name);
         return Promise.resolve();
     }
     return new Promise(function(resolve) {
-        wx.loadSubpackage({
-            name: name,
-            success: function() {
-                console.log('[game.js] Subpackage "' + name + '" loaded');
-                resolve();
-            },
-            fail: function(err) {
-                console.log('[game.js] Subpackage "' + name + '" load issue:', err.errMsg || err);
-                resolve();
-            }
-        });
+        function attempt() {
+            var task = wx.loadSubpackage({
+                name: name,
+                success: function() {
+                    console.log('[game.js] Subpackage "' + name + '" loaded');
+                    kickWatchdog();
+                    resolve();
+                },
+                fail: function(err) {
+                    console.error('[game.js] Subpackage "' + name + '" load failed:', err && (err.errMsg || err));
+                    showStartupFailure('加载失败，请检查网络后重试', attempt);
+                }
+            });
+            if (task && typeof task.onProgressUpdate === 'function') task.onProgressUpdate(kickWatchdog);
+        }
+        attempt();
     });
 }
 
 async function startGame() {
+    kickWatchdog();
     try {
         // Phase 0: Install setter on window.Gdx so we get notified
         // instantly when gdx.wasm.js sets it (via asyncCall).
@@ -79,11 +163,15 @@ async function startGame() {
         var engineReadyPromise = enginePromise.then(function() {
             __perfMark('engine_loaded');
             __perfReport('phase1_engine', 'subpackages_start');
+            // The engine entry script catches its require() errors; without the engine
+            // window.Gdx is never set, and loading the subpackage again does not re-run it.
+            if (globalThis.__engineError) failStartup('engine script', globalThis.__engineError);
         });
 
         // Phase 2: Gdx fires via setter — no polling needed
         var gdxPromise = gdxReadyPromise.then(function() {
             __perfMark('gdx_ready');
+            kickWatchdog();
             __perfReport('phase3_engine_wait', 'engine_loaded');
         });
 
@@ -118,14 +206,20 @@ async function startGame() {
 
         // Phase 5: Start the compiled game via globalThis bridge
         var mainModule = globalThis.__gameApp;
-        if (mainModule && mainModule.main) {
-            __perfMark('main_call');
-            mainModule.main([${mainClassArgs}]);
-            __perfMark('main_returned');
-            __perfReport('phase5_main', 'main_call');
-        } else {
-            console.error('[game.js] ERROR: __gameApp not available, cannot call main()');
+        if (!mainModule || !mainModule.main) {
+            throw new Error('__gameApp not available, cannot call main(): ' + globalThis.__gameAppError);
         }
+        if (fatalShown) return;
+        __perfMark('main_call');
+        // TeaVM reports an exception thrown by main() to this callback instead of throwing it.
+        mainModule.main([${mainClassArgs}], function(err) {
+            if (err) failStartup('main', err);
+        });
+        __perfMark('main_returned');
+        __perfReport('phase5_main', 'main_call');
+        startupFinished = true;
+        stopWatchdog();
+        if (typeof wx.offUnhandledRejection === 'function') wx.offUnhandledRejection(onStartupRejection);
 
         // Redraw splash to bridge canvas resize gap
         firstScreen.redraw();
@@ -144,7 +238,7 @@ async function startGame() {
                 ' main_ms=' + safe('main_returned', 'main_call'));
         })();
     } catch (err) {
-        console.error('[game.js] FAILED:', err);
+        failStartup('exception', err);
     }
 }
 

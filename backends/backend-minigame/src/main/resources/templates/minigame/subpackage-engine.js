@@ -12,7 +12,10 @@ try {
 try {
     var wasmModule = require('./gdx.wasm.js');
     console.log('[engine] gdx.wasm.js loaded');
-} catch(e) { console.error('[engine] gdx.wasm.js require failed:', e.message); }
+} catch(e) {
+    globalThis.__engineError = e;
+    console.error('[engine] gdx.wasm.js require failed:', e.message);
+}
 
 globalThis.__engineReady = true;
 console.log('[engine] game.js done');
