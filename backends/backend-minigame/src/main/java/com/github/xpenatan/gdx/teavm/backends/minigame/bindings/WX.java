@@ -133,6 +133,9 @@ public final class WX {
     @JSBody(params = "callback", script = "if (typeof wx.onAudioInterruptionEnd === 'function') wx.onAudioInterruptionEnd(callback);")
     public static native void onAudioInterruptionEnd(OnHideCallback callback);
 
+    @JSBody(script = "if (typeof wx.exitMiniProgram === 'function') wx.exitMiniProgram({});")
+    public static native void exitMiniProgram();
+
     // === Dialogs ===
 
     /**
@@ -168,8 +171,9 @@ public final class WX {
     @JSBody(script = "wx.vibrateLong();")
     public static native void vibrateLong();
 
-    @JSBody(script = "wx.vibrateShort({type:'heavy'});")
-    public static native void vibrateShort();
+    /** @param type "light", "medium" or "heavy" */
+    @JSBody(params = "type", script = "wx.vibrateShort({type: type});")
+    public static native void vibrateShort(String type);
 
     // === Script Loading ===
 

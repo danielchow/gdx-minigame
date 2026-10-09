@@ -19,7 +19,8 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public void preload(String assetFileUrl, AssetLoaderListener<Void> preloadListener) {
-        // No-op: packaged assets need no preloading
+        // Packaged assets need no preloading, so it is complete at once
+        if (preloadListener != null) preloadListener.onSuccess(assetFileUrl, null);
     }
 
     @Override
@@ -72,7 +73,8 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public void loadScript(String path, AssetLoaderListener<String> listener) {
-        // No-op: scripts loaded via require() in game.js
+        // game.js has already loaded every script through the engine subpackage
+        if (listener != null) listener.onSuccess(path, "");
     }
 
     @Override

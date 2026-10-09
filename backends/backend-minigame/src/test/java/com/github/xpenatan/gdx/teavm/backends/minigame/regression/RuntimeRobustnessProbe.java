@@ -2,6 +2,7 @@ package com.github.xpenatan.gdx.teavm.backends.minigame.regression;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
@@ -116,6 +117,25 @@ public final class RuntimeRobustnessProbe {
                         default: return "OS X".equals(System.getProperty("os.name")) ? 1 : 0;
                     }
                 }
+                case "vibrate": Gdx.input.vibrate(arg); return 0;
+                case "vibrateType": Gdx.input.vibrate(Input.VibrationType.values()[arg]); return 0;
+                case "textInput": {
+                    Input.TextInputListener listener = new Input.TextInputListener() {
+                        @Override
+                        public void input(String text) {
+                            record("textInput", 0);
+                        }
+
+                        @Override
+                        public void canceled() {
+                            record("textCanceled", 0);
+                        }
+                    };
+                    if (arg == 0) Gdx.input.getTextInput(listener, "title", "text", "hint");
+                    else Gdx.input.getTextInput(listener, "title", "text", "hint", Input.OnscreenKeyboardType.Default);
+                    return 0;
+                }
+                case "exit": Gdx.app.exit(); return 0;
                 // Reaches WebGL20.glTexImage2D, so the release-logging test sees its code.
                 case "texImage2D":
                     Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, 1, 1, 0, GL20.GL_RGBA,

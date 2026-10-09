@@ -46,6 +46,8 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
     const contexts = [];
     const modals = [];
     const restarts = [];
+    const vibrations = [];
+    const exits = [];
     const report = {events: []};
     const on = name => listener => (listeners[name] ??= []).push(listener);
     const gl = noopProxy({getParameter: () => 'WebGL 1.0 (probe)', getExtension: () => null,
@@ -71,6 +73,9 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
         onTouchEnd: on('touchend'), onTouchCancel: on('touchcancel'),
         showModal: options => modals.push(options),
         restartMiniProgram: options => restarts.push(options),
+        exitMiniProgram: options => exits.push(options),
+        vibrateShort: options => vibrations.push(['short', options?.type]),
+        vibrateLong: () => vibrations.push(['long']),
     });
     const canvas = {width: 100, height: 200, getContext: () => gl};
     const context = vm.createContext({exports: {}, console, performance, wx, canvas, __robustnessProbe: report,
@@ -83,7 +88,7 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
 
     const fire = (name, event) => {for (const listener of listeners[name] ?? []) listener(event);};
     return {
-        report, contexts, modals, restarts, listeners, fire, windowInfo,
+        report, contexts, modals, restarts, vibrations, exits, listeners, fire, windowInfo,
         command: (name, arg = 0) => report.command(name, arg),
         /** Runs every frame queued so far; returns how many ran. */
         runFrames() {
@@ -97,6 +102,7 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
 }
 
 const soundContexts = probe => probe.contexts.filter(c => c.src === 'assets/effect.mp3');
+const eventCount = (probe, name) => probe.report.events.filter(e => e === name + ':0').length;
 const musicContext = (probe, i) => probe.contexts.find(c => c.src === `assets/music${i}.mp3`);
 
 test('pooled sound contexts keep one listener each over many plays, and pool and steal still work', () => {
@@ -295,4 +301,30 @@ test('a reused sound context is not given its source again', () => {
     probe.command('playSound');
     assert.equal(context.srcAssignments, 4);
     assert.equal(context.state, 'playing');
+});
+
+test('vibrate picks the short or long vibration by duration, and maps vibration types', () => {
+    const probe = startProbe();
+    for (const ms of [1, 50, 199, 200, 400, 1000]) probe.command('vibrate', ms);
+    for (const type of [0, 1, 2]) probe.command('vibrateType', type);
+    assert.deepEqual(probe.vibrations, [
+        ['short', 'medium'], ['short', 'medium'], ['short', 'medium'], ['long'], ['long'], ['long'],
+        ['short', 'light'], ['short', 'medium'], ['short', 'heavy'],
+    ]);
+});
+
+test('getTextInput cancels, since WeChat has no text input dialog', () => {
+    const probe = startProbe();
+    probe.runFrames();
+    probe.command('textInput', 0);
+    probe.command('textInput', 1);
+    probe.runFrames();
+    assert.equal(eventCount(probe, 'textCanceled'), 2);
+    assert.equal(eventCount(probe, 'textInput'), 0);
+});
+
+test('exit leaves the mini game', () => {
+    const probe = startProbe();
+    probe.command('exit');
+    assert.equal(probe.exits.length, 1);
 });

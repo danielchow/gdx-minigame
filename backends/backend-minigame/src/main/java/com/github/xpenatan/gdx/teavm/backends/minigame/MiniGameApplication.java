@@ -433,8 +433,10 @@ public class MiniGameApplication implements Application {
         runnables.add(runnable);
     }
 
+    /** Closes the mini game through wx.exitMiniProgram, where the base library has it. */
     @Override
     public void exit() {
+        WX.exitMiniProgram();
     }
 
     @Override
