@@ -225,8 +225,13 @@ public class MiniGameApplication implements Application {
             input.reset();
 
         } catch (Throwable t) {
+            // The loop stops after this frame: running further frames would repeat the error
             stepError = true;
-            onError(t);
+            try {
+                onError(t);
+            } finally {
+                onFatalError(t);
+            }
         } finally {
             graphics.end();
         }
@@ -234,6 +239,14 @@ public class MiniGameApplication implements Application {
 
     protected void onError(Throwable error) {
         printErrorStack(error);
+    }
+
+    /**
+     * Called once after {@link #onError(Throwable)} when a frame throws; the game loop has
+     * stopped. By default it asks the player to restart, so the game does not freeze silently.
+     */
+    protected void onFatalError(Throwable error) {
+        WX.showRestartModal("提示", "游戏出现错误，请重新启动", "重启");
     }
 
     public static void printErrorStack(Object obj) {

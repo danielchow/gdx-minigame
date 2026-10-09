@@ -113,6 +113,20 @@ public final class WX {
     @JSBody(params = "callback", script = "wx.onHide(callback);")
     public static native void onHide(OnHideCallback callback);
 
+    // === Dialogs ===
+
+    /**
+     * Shows a modal with a single button that restarts the mini game, falling back to exiting it
+     * where wx.restartMiniProgram (base library 2.22.1) is unavailable or fails.
+     */
+    @JSBody(params = {"title", "content", "confirmText"}, script =
+        "function exit() { if (typeof wx.exitMiniProgram === 'function') wx.exitMiniProgram({}); }" +
+        "wx.showModal({title: title, content: content, showCancel: false, confirmText: confirmText," +
+        "complete: function() {" +
+        "if (typeof wx.restartMiniProgram === 'function') wx.restartMiniProgram({fail: exit}); else exit();" +
+        "}});")
+    public static native void showRestartModal(String title, String content, String confirmText);
+
     // === Clipboard ===
 
     @JSBody(params = "data", script = "wx.setClipboardData({data: data});")
