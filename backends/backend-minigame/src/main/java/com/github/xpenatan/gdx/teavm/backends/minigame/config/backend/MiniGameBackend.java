@@ -38,6 +38,8 @@ public class MiniGameBackend extends TeaBackend {
 
     public String appId = "";
     public String orientation = "portrait";
+    /** Orientation in Windows and Mac WeChat; null uses {@link #orientation} there too. */
+    public String desktopOrientation;
     public String description = "WeChat Mini Game";
     public String targetFileName = "app";
     public String mainClassArgs = "";
@@ -50,6 +52,12 @@ public class MiniGameBackend extends TeaBackend {
 
     public MiniGameBackend setOrientation(String orientation) {
         this.orientation = orientation;
+        return this;
+    }
+
+    /** game.json desktopDeviceOrientation: e.g. a landscape window for a portrait phone game. */
+    public MiniGameBackend setDesktopOrientation(String desktopOrientation) {
+        this.desktopOrientation = desktopOrientation;
         return this;
     }
 
@@ -167,7 +175,8 @@ public class MiniGameBackend extends TeaBackend {
      */
     private void generateGameJson() {
         String json = TemplateUtil.resolve("game.json",
-            Map.of("orientation", orientation));
+            Map.of("orientation", orientation,
+                "desktopOrientation", desktopOrientation != null ? desktopOrientation : orientation));
         FileHandle gameJson = releasePath.child("game.json");
         gameJson.writeString(json, false);
     }

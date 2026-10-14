@@ -68,6 +68,7 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
             return context;
         },
         onShow: on('show'), onHide: on('hide'),
+        onWindowStateChange: on('windowState'),
         onAudioInterruptionBegin: on('interruptionBegin'), onAudioInterruptionEnd: on('interruptionEnd'),
         onTouchStart: on('touchstart'), onTouchMove: on('touchmove'),
         onTouchEnd: on('touchend'), onTouchCancel: on('touchcancel'),
@@ -192,6 +193,26 @@ test('overlapping hide and interruption resume once both are over, or on show', 
     assert.equal(musicContext(probe, 0).state, 'paused');
     probe.fire('interruptionEnd');
     assert.equal(musicContext(probe, 0).state, 'playing');
+});
+
+test('a minimized PC window pauses and resumes once, even when WeChat also reports hide and show', () => {
+    const probe = startProbe('windows');
+    probe.runFrames();
+    probe.command('playMusic', 0);
+    probe.fire('windowState', {state: 'minimize'});
+    assert.equal(musicContext(probe, 0).state, 'paused', 'minimizing does not fire onHide');
+    probe.fire('hide');
+    assert.equal(eventCount(probe, 'pause'), 1, 'a later onHide does not pause again');
+    probe.fire('windowState', {state: 'normalize'});
+    probe.fire('show', {});
+    assert.equal(eventCount(probe, 'resume'), 1);
+    assert.equal(musicContext(probe, 0).state, 'playing');
+
+    probe.fire('windowState', {state: 'maximize'});
+    assert.equal(eventCount(probe, 'resume'), 1, 'maximizing a visible window resumes nothing');
+    probe.fire('hide');
+    probe.fire('windowState', {state: 'maximize'});
+    assert.deepEqual([eventCount(probe, 'pause'), eventCount(probe, 'resume')], [2, 2]);
 });
 
 test('a cancelled touch reaches touchCancelled, not touchUp, and clears the pointer', () => {

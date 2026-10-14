@@ -17,6 +17,7 @@ import com.badlogic.gdx.utils.ObjectMap;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.OnHideCallback;
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WindowStateCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.dom.MiniGameNavigator;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.jmultiplatform.core.JMultiplatform;
@@ -72,6 +73,7 @@ public class MiniGameApplication implements Application {
     private final Array<Runnable> runnablesHelper = new Array<>();
 
     private boolean stepError;
+    private boolean hidden;
 
     public MiniGameApplication(ApplicationListener appListener, MiniGameApplicationConfiguration config) {
         this.config = config;
@@ -128,32 +130,13 @@ public class MiniGameApplication implements Application {
         this.audio = new MiniGameAudio();
         Gdx.audio = audio;
 
-        // Lifecycle: wx.onHide → pause
-        WX.onHide((OnHideCallback) () -> {
-            if (initState == AppState.APP_LOOP) {
-                synchronized (lifecycleListeners) {
-                    for (LifecycleListener listener : lifecycleListeners) {
-                        listener.pause();
-                    }
-                }
-                if (curListener != null) curListener.pause();
-            }
-            // After the listeners, so music the game pauses itself is not resumed on show
-            audio.onHide();
-        });
-
-        // Lifecycle: wx.onShow → resume
-        WX.onShow((LifecycleCallback) result -> {
-            // Before the listeners, so music they start plays immediately
-            audio.onShow();
-            if (initState == AppState.APP_LOOP) {
-                synchronized (lifecycleListeners) {
-                    for (LifecycleListener listener : lifecycleListeners) {
-                        listener.resume();
-                    }
-                }
-                if (curListener != null) curListener.resume();
-            }
+        // Lifecycle: wx.onHide → pause, wx.onShow → resume. PC WeChat does not fire onHide when
+        // its window is minimized, only wx.onWindowStateChange; restoring may fire both events.
+        WX.onHide((OnHideCallback) this::hide);
+        WX.onShow((LifecycleCallback) result -> show());
+        WX.onWindowStateChange((WindowStateCallback) state -> {
+            if ("minimize".equals(state)) hide();
+            else show();
         });
 
         // Phone calls, alarms and Siri pause all WeChat audio until the interruption ends
@@ -179,6 +162,38 @@ public class MiniGameApplication implements Application {
                 WX.requestAnimationFrame(callback1 -> appLoop.run());
             }
         });
+    }
+
+    /** Pauses once per hidden period, whether WeChat reports it as onHide, a minimize, or both. */
+    private void hide() {
+        if (hidden) return;
+        hidden = true;
+        if (initState == AppState.APP_LOOP) {
+            synchronized (lifecycleListeners) {
+                for (LifecycleListener listener : lifecycleListeners) {
+                    listener.pause();
+                }
+            }
+            if (curListener != null) curListener.pause();
+        }
+        // After the listeners, so music the game pauses itself is not resumed on show
+        audio.onHide();
+    }
+
+    private void show() {
+        // Before the listeners, so music they start plays immediately. Also on a show without a
+        // hide: it ends an audio interruption whose end event was missed.
+        audio.onShow();
+        if (!hidden) return;
+        hidden = false;
+        if (initState == AppState.APP_LOOP) {
+            synchronized (lifecycleListeners) {
+                for (LifecycleListener listener : lifecycleListeners) {
+                    listener.resume();
+                }
+            }
+            if (curListener != null) curListener.resume();
+        }
     }
 
     private void step(ApplicationListener appListener) {

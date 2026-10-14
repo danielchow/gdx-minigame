@@ -15,14 +15,20 @@ public final class RegressionProbeBuilder {
         build(PixmapBufferProbe.class, new File(outputRoot, "pixmap-buffer"));
         build(AsyncCompletionProbe.class, new File(outputRoot, "async-completion"));
         build(GLUploadRangeProbe.class, new File(outputRoot, "gl-upload-range"));
-        build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"));
+        // A portrait phone game in a landscape PC window, for BuildOutputTest.
+        build(RuntimeRobustnessProbe.class, new File(outputRoot, "runtime-robustness"), "landscape");
         build(StorageAndAssetsProbe.class, new File(outputRoot, "storage-and-assets"));
         build(FreeTypeGlyphProbe.class, new File(outputRoot, "freetype-glyph"));
         build(ShareProbe.class, new File(outputRoot, "share"));
     }
 
     private static void build(Class<?> probe, File output) {
-        new TeaCompiler(new MiniGameBackend().setAppId(probe.getSimpleName()))
+        build(probe, output, null);
+    }
+
+    private static void build(Class<?> probe, File output, String desktopOrientation) {
+        new TeaCompiler(new MiniGameBackend().setAppId(probe.getSimpleName())
+                .setDesktopOrientation(desktopOrientation))
             .setMainClass(probe.getName())
             .setOptimizationLevel(TeaVMOptimizationLevel.ADVANCED)
             .setObfuscated(true)

@@ -127,6 +127,11 @@ public final class WX {
     @JSBody(params = "callback", script = "wx.onHide(callback);")
     public static native void onHide(OnHideCallback callback);
 
+    /** PC WeChat only (base library 3.8.8): minimizing the window does not fire wx.onHide. */
+    @JSBody(params = "callback", script = "if (typeof wx.onWindowStateChange === 'function')" +
+        " wx.onWindowStateChange(function(windowStateResult) { callback(windowStateResult.state); });")
+    public static native void onWindowStateChange(WindowStateCallback callback);
+
     @JSBody(params = "callback", script = "if (typeof wx.onAudioInterruptionBegin === 'function') wx.onAudioInterruptionBegin(callback);")
     public static native void onAudioInterruptionBegin(OnHideCallback callback);
 

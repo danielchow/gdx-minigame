@@ -51,6 +51,16 @@ public final class RuntimeRobustnessProbe {
             }
 
             @Override
+            public void pause() {
+                record("pause", 0);
+            }
+
+            @Override
+            public void resume() {
+                record("resume", 0);
+            }
+
+            @Override
             public void render() {
                 record("render", 0);
                 if (throwOnRender) throw new IllegalStateException("expected-probe-failure");

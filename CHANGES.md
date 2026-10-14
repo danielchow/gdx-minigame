@@ -1,4 +1,5 @@
 [-SNAPSHOT]
+- PC WeChat: `MiniGameBackend.setDesktopOrientation()` writes `game.json` `desktopDeviceOrientation` (defaults to the mobile orientation); minimizing the window pauses the game and its audio like `wx.onHide`, and restoring resumes them, once per hidden period even when WeChat also fires `onHide`/`onShow`
 - Extract embedded JS/JSON string templates from MiniGameBackend.java into 8 external template files with `TemplateUtil` for `${var}` placeholder substitution
 - Add `.gitattributes` to enforce LF line endings for template resource files
 - Filter leaked template resource files from classpath scanning in `copyAssets()`

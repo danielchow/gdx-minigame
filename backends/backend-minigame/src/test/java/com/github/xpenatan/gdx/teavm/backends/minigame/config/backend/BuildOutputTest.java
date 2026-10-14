@@ -56,6 +56,16 @@ public class BuildOutputTest {
     }
 
     @Test
+    public void desktopOrientationDefaultsToTheMobileOne() throws IOException {
+        JsonValue fallback = new JsonReader().parse(read(new File(probe("share"), "game.json")));
+        assertEquals("portrait", fallback.getString("deviceOrientation"));
+        assertEquals("portrait", fallback.getString("desktopDeviceOrientation"));
+        JsonValue landscape = new JsonReader().parse(read(new File(probe("runtime-robustness"), "game.json")));
+        assertEquals("portrait", landscape.getString("deviceOrientation"));
+        assertEquals("landscape", landscape.getString("desktopDeviceOrientation"));
+    }
+
+    @Test
     public void projectConfigIgnoresDebugOutputs() throws IOException {
         JsonValue config = new JsonReader().parse(read(new File(probe("async-completion"), "project.config.json")));
         Set<String> ignored = new HashSet<>();
