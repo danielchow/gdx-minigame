@@ -17,6 +17,7 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGL2RenderingContext
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLContextAttributesExt;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLRenderingContextExt;
 import org.teavm.jso.JSBody;
+import org.teavm.jso.JSObject;
 import org.teavm.jso.dom.html.HTMLCanvasElement;
 import org.teavm.jso.webgl.WebGLContextAttributes;
 import org.teavm.jso.webgl.WebGLRenderingContext;
@@ -67,8 +68,8 @@ public class MiniGameGraphics implements Graphics {
         // as it is now: wx.createCanvas() ran in game.js before the subpackages loaded, and
         // desktop WeChat can still be opening its window then, which left a squashed canvas
         // that WeChat stretched over the final window.
-        updateWindowMetrics();
-        WX.onWindowResize((LifecycleCallback) result -> updateWindowMetrics());
+        updateWindowMetrics(null);
+        WX.onWindowResize((LifecycleCallback) this::updateWindowMetrics);
 
         WebGLContextAttributesExt attr = (WebGLContextAttributesExt) WebGLContextAttributes.create();
         attr.setAlpha(config.alpha);
@@ -231,20 +232,30 @@ public class MiniGameGraphics implements Graphics {
         return pixelRatio;
     }
 
+    @JSBody(params = "resize", script = "return resize.windowWidth || 0;")
+    private static native double windowWidthOf(JSObject resize);
+
+    @JSBody(params = "resize", script = "return resize.windowHeight || 0;")
+    private static native double windowHeightOf(JSObject resize);
+
     /** Canvas pixels per logical window pixel, for mapping touch coordinates. */
     public float getTouchScaleX() { return (float) (canvas.getWidth() / windowWidth); }
 
     public float getTouchScaleY() { return (float) (canvas.getHeight() / windowHeight); }
 
     /**
-     * Re-reads pixel ratio, window size and safe area from one wx.getWindowInfo() call, and sizes
-     * the canvas to the window in physical pixels; insets in physical pixels.
+     * Re-reads pixel ratio, window size and safe area from one wx.getWindowInfo() call, preferring
+     * the size a wx.onWindowResize event carries, and sizes the canvas to the window in physical
+     * pixels; insets in physical pixels.
      */
-    protected void updateWindowMetrics() {
+    protected void updateWindowMetrics(JSObject resize) {
         WXWindowInfo info = WX.getWindowInfo();
         pixelRatio = info.getPixelRatio();
-        windowWidth = info.getWindowWidth();
-        windowHeight = info.getWindowHeight();
+        // The event's size is the new one; desktop WeChat's getWindowInfo() can still lag behind it.
+        double eventWidth = resize != null ? windowWidthOf(resize) : 0;
+        double eventHeight = resize != null ? windowHeightOf(resize) : 0;
+        windowWidth = eventWidth > 0 ? eventWidth : info.getWindowWidth();
+        windowHeight = eventHeight > 0 ? eventHeight : info.getWindowHeight();
         int width = (int) (windowWidth * pixelRatio);
         int height = (int) (windowHeight * pixelRatio);
         // Assigning a size clears the drawing buffer even when it is unchanged.

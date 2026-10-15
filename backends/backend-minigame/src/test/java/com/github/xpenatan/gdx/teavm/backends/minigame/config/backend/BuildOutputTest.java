@@ -66,6 +66,13 @@ public class BuildOutputTest {
     }
 
     @Test
+    public void displayModeIsWrittenOnlyWhenSet() throws IOException {
+        assertFalse(new JsonReader().parse(read(new File(probe("share"), "game.json"))).has("displayMode"));
+        JsonValue desktop = new JsonReader().parse(read(new File(probe("runtime-robustness"), "game.json")));
+        assertEquals("desktop", desktop.getString("displayMode"));
+    }
+
+    @Test
     public void projectConfigIgnoresDebugOutputs() throws IOException {
         JsonValue config = new JsonReader().parse(read(new File(probe("async-completion"), "project.config.json")));
         Set<String> ignored = new HashSet<>();

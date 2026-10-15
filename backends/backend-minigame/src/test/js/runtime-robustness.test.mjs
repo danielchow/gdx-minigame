@@ -289,6 +289,16 @@ test('a window resize resizes the canvas, the app and touch mapping', () => {
     assert.deepEqual(probe.values('resizeWidth'), [200, 600], 'an unchanged size does not resize again');
 });
 
+test('a resize event\'s size wins over a getWindowInfo() that still reports the old window', () => {
+    const probe = startProbe('mac', noopProxy(), {window: {pixelRatio: 2}});
+    probe.runFrames();
+    probe.fire('windowResize', {windowWidth: 400, windowHeight: 225});
+    probe.runFrames();
+    assert.deepEqual([probe.command('graphicsWidth'), probe.command('graphicsHeight')], [800, 450]);
+    probe.touch('touchstart', 1, 400, 225);
+    assert.deepEqual([probe.values('pointerX'), probe.values('pointerY')], [[800], [450]]);
+});
+
 test('density and safe insets are cached and refreshed on window resize', () => {
     const probe = startProbe();
     probe.runFrames();

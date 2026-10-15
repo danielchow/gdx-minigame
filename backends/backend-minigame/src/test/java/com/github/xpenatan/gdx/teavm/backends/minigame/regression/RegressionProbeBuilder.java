@@ -27,8 +27,10 @@ public final class RegressionProbeBuilder {
     }
 
     private static void build(Class<?> probe, File output, String desktopOrientation) {
+        // A desktop orientation marks the probe that stands for a PC-ready game.
         new TeaCompiler(new MiniGameBackend().setAppId(probe.getSimpleName())
-                .setDesktopOrientation(desktopOrientation))
+                .setDesktopOrientation(desktopOrientation)
+                .setDisplayMode(desktopOrientation != null ? "desktop" : null))
             .setMainClass(probe.getName())
             .setOptimizationLevel(TeaVMOptimizationLevel.ADVANCED)
             .setObfuscated(true)
