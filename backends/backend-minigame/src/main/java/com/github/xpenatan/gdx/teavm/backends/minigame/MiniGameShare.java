@@ -1,5 +1,6 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame;
 
+import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.teavm.jso.JSBody;
@@ -69,12 +70,17 @@ public final class MiniGameShare {
      * is posted when the provider does not reply in time. The card image is also the post's
      * full-size preview, which would otherwise be a screenshot of the game.
      * <p>
-     * Moments is a WeChat beta, documented for Android. Does nothing where WeChat lacks
+     * iOS WeChat ignores a preview the game wrote at runtime (temp or user files), then takes that
+     * screenshot, which costs 4-7 s. On iOS the preview is therefore always the placeholder's
+     * {@code imagePath}, which must be a file in the code package; the card still is the cover.
+     * <p>
+     * Moments is a WeChat beta, documented for Android but also offered on iOS. Does nothing where WeChat lacks
      * {@code wx.onShareTimeline}.
      */
     public static void setTimelineShare(String title, String imagePath, String query, MenuProvider provider) {
         if (!hasShareTimeline()) return;
-        nativeSetTimelineShare(title, imagePath, query, reply -> provider.provide(reply::reply));
+        boolean packagePreviewOnly = "ios".equals(WX.getPlatform());
+        nativeSetTimelineShare(title, imagePath, query, packagePreviewOnly, reply -> provider.provide(reply::reply));
         timelineMenu = true;
         showShareMenu();
     }
@@ -168,11 +174,13 @@ public final class MiniGameShare {
     @JSBody(script = "return typeof wx !== 'undefined' && typeof wx.onShareTimeline === 'function';")
     private static native boolean hasShareTimeline();
 
-    @JSBody(params = {"title", "imagePath", "query", "provider"}, script = ""
+    @JSBody(params = {"title", "imagePath", "query", "packagePreviewOnly", "provider"}, script = ""
         + "function timelineCardOf(cardTitle, cardImage, cardQuery) {"
         + "  var timelineCard = {};"
         + "  if (cardTitle != null) timelineCard.title = cardTitle;"
-        + "  if (cardImage != null) { timelineCard.imageUrl = cardImage; timelineCard.imagePreviewUrl = cardImage; }"
+        + "  if (cardImage != null) timelineCard.imageUrl = cardImage;"
+        + "  var previewImage = packagePreviewOnly ? imagePath : cardImage;"
+        + "  if (previewImage != null) timelineCard.imagePreviewUrl = previewImage;"
         + "  if (cardQuery != null) timelineCard.query = cardQuery;"
         + "  return timelineCard;"
         + "}"
@@ -186,7 +194,8 @@ public final class MiniGameShare {
         + "  timelineAnswer.closed = true;"
         + "  return timelineAnswer.card || timelineCardOf(title, imagePath, query);"
         + "});")
-    private static native void nativeSetTimelineShare(String title, String imagePath, String query, NativeProvider provider);
+    private static native void nativeSetTimelineShare(String title, String imagePath, String query, boolean packagePreviewOnly,
+        NativeProvider provider);
 
     @JSBody(params = {"chatMenu", "timelineMenu"}, script = ""
         + "var shownMenus = [];"

@@ -24,7 +24,7 @@ class MockCanvas {
     }
 }
 
-function startProbe({launchQuery = {}, shareAppMessage = true, shareTimeline = true} = {}) {
+function startProbe({launchQuery = {}, shareAppMessage = true, shareTimeline = true, platform = 'android'} = {}) {
     const listeners = {};
     const shares = [];
     const shareMenus = [];
@@ -32,6 +32,7 @@ function startProbe({launchQuery = {}, shareAppMessage = true, shareTimeline = t
     const report = {events: []};
     const wx = {
         getLaunchOptionsSync: () => ({scene: 1007, query: launchQuery}),
+        getDeviceInfo: () => ({platform}),
         onShow: listener => (listeners.show ??= []).push(listener),
         showShareMenu: options => shareMenus.push(options),
         onShareAppMessage: listener => (listeners.shareMenu ??= []).push(listener),
@@ -177,6 +178,18 @@ test('Moments posts the placeholder when the provider replies late or not at all
     noImage.command('timeline', 2);
     assert.deepEqual({...noImage.openTimeline()[0]}, {title: 'No image', imageUrl: 'invite.png',
         imagePreviewUrl: 'invite.png', query: 'deal=NOIMG'});
+});
+
+test('on iOS the Moments preview is the package placeholder, the card stays the cover', () => {
+    const probe = startProbe({platform: 'ios'});
+    probe.command('timeline', 0);
+    assert.deepEqual({...probe.openTimeline()[0]}, {title: 'Deal card', imageUrl: 'wxfile://tmp/deal.png',
+        imagePreviewUrl: 'invite.png', query: 'deal=XYZ'}, 'iOS ignores runtime files and screenshots instead');
+
+    const silent = startProbe({platform: 'ios'});
+    silent.command('timeline', 3);
+    assert.deepEqual({...silent.openTimeline()[0]}, {title: 'Invite', imageUrl: 'invite.png',
+        imagePreviewUrl: 'invite.png', query: ''});
 });
 
 test('chat and Moments menus stay shown together in either order', () => {

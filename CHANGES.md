@@ -1,6 +1,6 @@
 [-SNAPSHOT]
 - The canvas is sized from `wx.getWindowInfo()` window size when the app starts and follows `wx.onWindowResize`, instead of keeping the size `wx.createCanvas()` caught in `game.js`: desktop WeChat could still be opening its window then and stretched the squashed canvas over the final window. Touch mapping follows the same window size
-- `MiniGameShare.setTimelineShare()`: 分享到朋友圈 (Moments) with a synchronously rendered card that is also the post's preview (never WeChat's game screenshot); `wx.onShareTimeline` ignores `{promise}` replies. 转发 and Moments share one `showShareMenu` list in either order
+- `MiniGameShare.setTimelineShare()`: 分享到朋友圈 (Moments) with a synchronously rendered card that is also the post's preview (never WeChat's game screenshot); `wx.onShareTimeline` ignores `{promise}` replies. On iOS the preview is the placeholder's package image, because iOS WeChat ignores runtime files there and takes a 4-7 s screenshot. 转发 and Moments share one `showShareMenu` list in either order
 - PC WeChat: `MiniGameBackend.setDesktopOrientation()` writes `game.json` `desktopDeviceOrientation` (defaults to the mobile orientation); minimizing the window pauses the game and its audio like `wx.onHide`, and restoring resumes them, once per hidden period even when WeChat also fires `onHide`/`onShow`
 - Extract embedded JS/JSON string templates from MiniGameBackend.java into 8 external template files with `TemplateUtil` for `${var}` placeholder substitution
 - Add `.gitattributes` to enforce LF line endings for template resource files
