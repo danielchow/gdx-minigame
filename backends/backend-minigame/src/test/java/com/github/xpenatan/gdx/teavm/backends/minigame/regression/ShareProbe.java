@@ -24,6 +24,15 @@ public final class ShareProbe {
                         else if (arg == 2) reply.reply("No image", null, "deal=NOIMG");
                     });
                     return 0;
+                case "timeline":
+                    // 0 replies at once, 1 later, 2 with no image, 3 never.
+                    MiniGameShare.setTimelineShare("Invite", "invite.png", "", reply -> {
+                        record("timeline:" + arg);
+                        if (arg == 0) reply.reply("Deal card", "wxfile://tmp/deal.png", "deal=XYZ");
+                        else if (arg == 1) lateReply = reply;
+                        else if (arg == 2) reply.reply("No image", null, "deal=NOIMG");
+                    });
+                    return 0;
                 case "replyLate": lateReply.reply("Late card", "wxfile://tmp/late.png", "deal=LATE"); return 0;
                 case "listen":
                     MiniGameShare.setLaunchQueryListener(query -> {

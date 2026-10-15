@@ -24,7 +24,7 @@ class MockCanvas {
     }
 }
 
-function startProbe({launchQuery = {}, shareAppMessage = true} = {}) {
+function startProbe({launchQuery = {}, shareAppMessage = true, shareTimeline = true} = {}) {
     const listeners = {};
     const shares = [];
     const shareMenus = [];
@@ -42,6 +42,7 @@ function startProbe({launchQuery = {}, shareAppMessage = true} = {}) {
         },
     };
     if (shareAppMessage) wx.shareAppMessage = options => shares.push(options);
+    if (shareTimeline) wx.onShareTimeline = listener => (listeners.timeline ??= []).push(listener);
     const context = vm.createContext({exports: {}, console, performance, wx, __shareProbe: report,
         setTimeout, clearTimeout, ...typedArrays});
     vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
@@ -52,6 +53,7 @@ function startProbe({launchQuery = {}, shareAppMessage = true} = {}) {
         report, shares, shareMenus, canvases, listeners,
         command: (name, arg = 0) => report.command(name, arg),
         openMenu: () => listeners.shareMenu.map(listener => listener({from: 'menu'})),
+        openTimeline: () => listeners.timeline.map(listener => listener()),
     };
 }
 
@@ -145,4 +147,53 @@ test('encodePng rejects a wrong pixel count and reports a failed encode', () => 
     probe.canvases[0].failNext = true;
     probe.command('encodeFails');
     assert.deepEqual(probe.report.events.filter(e => !e.startsWith('path:')), ['rejected', 'failed']);
+});
+
+test('Moments shows the provider card, with the card image as its preview', () => {
+    const probe = startProbe();
+    probe.command('timeline', 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(probe.shareMenus)), [{menus: ['shareTimeline']}]);
+    const [card] = probe.openTimeline();
+    assert.deepEqual({...card}, {title: 'Deal card', imageUrl: 'wxfile://tmp/deal.png',
+        imagePreviewUrl: 'wxfile://tmp/deal.png', query: 'deal=XYZ'}, 'never the default screenshot preview');
+    assert.deepEqual(probe.report.events, ['timeline:0']);
+});
+
+test('Moments posts the placeholder when the provider replies late or not at all', () => {
+    const invite = {title: 'Invite', imageUrl: 'invite.png', imagePreviewUrl: 'invite.png', query: ''};
+    const late = startProbe();
+    late.command('timeline', 1);
+    const [card] = late.openTimeline();
+    assert.deepEqual({...card}, invite, 'WeChat ignores promises for Moments');
+    assert.equal(card.promise, undefined);
+    late.command('replyLate');
+    assert.deepEqual({...card}, invite, 'a reply after returning changes nothing');
+
+    const silent = startProbe();
+    silent.command('timeline', 3);
+    assert.deepEqual({...silent.openTimeline()[0]}, invite);
+
+    const noImage = startProbe();
+    noImage.command('timeline', 2);
+    assert.deepEqual({...noImage.openTimeline()[0]}, {title: 'No image', imageUrl: 'invite.png',
+        imagePreviewUrl: 'invite.png', query: 'deal=NOIMG'});
+});
+
+test('chat and Moments menus stay shown together in either order', () => {
+    const chatFirst = startProbe();
+    chatFirst.command('menu', 0);
+    chatFirst.command('timeline', 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(chatFirst.shareMenus.at(-1))), {menus: ['shareAppMessage', 'shareTimeline']});
+
+    const timelineFirst = startProbe();
+    timelineFirst.command('timeline', 0);
+    timelineFirst.command('menu', 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(timelineFirst.shareMenus.at(-1))), {menus: ['shareAppMessage', 'shareTimeline']});
+});
+
+test('without wx.onShareTimeline, Moments stays hidden and the chat menu is unchanged', () => {
+    const probe = startProbe({shareTimeline: false});
+    probe.command('timeline', 0);
+    probe.command('menu', 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(probe.shareMenus)), [{menus: ['shareAppMessage']}]);
 });

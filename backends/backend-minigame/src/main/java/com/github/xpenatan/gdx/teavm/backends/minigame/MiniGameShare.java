@@ -8,8 +8,8 @@ import org.teavm.jso.JSObject;
 import org.teavm.jso.typedarrays.Int8Array;
 
 /**
- * WeChat share cards ({@code wx.shareAppMessage}), the top-right 转发 menu, and the query a
- * card carries back into the game.
+ * WeChat share cards ({@code wx.shareAppMessage}), the top-right 转发 and 分享到朋友圈 menu
+ * items, and the query a card carries back into the game.
  * <p>
  * Always supply an image: without one WeChat shares a screenshot of the game. Card images are
  * shown at 5:4. A query has the form {@code k1=v1&k2=v2}. Sharing does not need a user gesture.
@@ -20,6 +20,8 @@ import org.teavm.jso.typedarrays.Int8Array;
 public final class MiniGameShare {
 
     private static JSObject encodeCanvas;
+    private static boolean chatMenu;
+    private static boolean timelineMenu;
 
     private MiniGameShare() {}
 
@@ -28,7 +30,10 @@ public final class MiniGameShare {
         void provide(MenuReply reply);
     }
 
-    /** WeChat waits about three seconds for a late reply, then sends the placeholder card. */
+    /**
+     * For 转发, WeChat waits about three seconds for a late reply, then sends the placeholder
+     * card. For Moments only a reply made before {@link MenuProvider#provide} returns counts.
+     */
     public interface MenuReply {
         /** A null title, image or query keeps the placeholder's. */
         void reply(String title, String imagePath, String query);
@@ -49,11 +54,34 @@ public final class MiniGameShare {
     }
 
     /**
-     * Shows 转发 (friends and groups only, no Moments) and answers it with {@code provider}.
+     * Shows 转发 (friends and groups) and answers it with {@code provider}.
      * The placeholder card is sent when the provider replies late or not at all.
      */
     public static void setShareMenu(String title, String imagePath, String query, MenuProvider provider) {
         nativeSetShareMenu(title, imagePath, query, reply -> provider.provide(reply::reply));
+        chatMenu = true;
+        showShareMenu();
+    }
+
+    /**
+     * Shows 分享到朋友圈 (Moments) and answers it with {@code provider}, which must reply before
+     * it returns: WeChat ignores a late answer, so render the card synchronously. The placeholder
+     * is posted when the provider does not reply in time. The card image is also the post's
+     * full-size preview, which would otherwise be a screenshot of the game.
+     * <p>
+     * Moments is a WeChat beta, documented for Android. Does nothing where WeChat lacks
+     * {@code wx.onShareTimeline}.
+     */
+    public static void setTimelineShare(String title, String imagePath, String query, MenuProvider provider) {
+        if (!hasShareTimeline()) return;
+        nativeSetTimelineShare(title, imagePath, query, reply -> provider.provide(reply::reply));
+        timelineMenu = true;
+        showShareMenu();
+    }
+
+    /** One menu list for both setters, so either order keeps both items. */
+    private static void showShareMenu() {
+        nativeShowShareMenu(chatMenu, timelineMenu);
     }
 
     /** Delivers the launch query now, if any, and each later {@code wx.onShow} query. */
@@ -121,7 +149,6 @@ public final class MiniGameShare {
         + "  return shareCard;"
         + "}"
         + "var placeholderCard = shareCardOf(title, imagePath, query);"
-        + "wx.showShareMenu({menus: ['shareAppMessage']});"
         + "wx.onShareAppMessage(function () {"
         + "  var pendingReply = {card: null, resolve: null};"
         + "  provider(function (cardTitle, cardImage, cardQuery) {"
@@ -137,6 +164,36 @@ public final class MiniGameShare {
         + "  return lateCard;"
         + "});")
     private static native void nativeSetShareMenu(String title, String imagePath, String query, NativeProvider provider);
+
+    @JSBody(script = "return typeof wx !== 'undefined' && typeof wx.onShareTimeline === 'function';")
+    private static native boolean hasShareTimeline();
+
+    @JSBody(params = {"title", "imagePath", "query", "provider"}, script = ""
+        + "function timelineCardOf(cardTitle, cardImage, cardQuery) {"
+        + "  var timelineCard = {};"
+        + "  if (cardTitle != null) timelineCard.title = cardTitle;"
+        + "  if (cardImage != null) { timelineCard.imageUrl = cardImage; timelineCard.imagePreviewUrl = cardImage; }"
+        + "  if (cardQuery != null) timelineCard.query = cardQuery;"
+        + "  return timelineCard;"
+        + "}"
+        + "wx.onShareTimeline(function () {"
+        + "  var timelineAnswer = {card: null, closed: false};"
+        + "  provider(function (cardTitle, cardImage, cardQuery) {"
+        + "    if (timelineAnswer.closed || timelineAnswer.card) return;"
+        + "    timelineAnswer.card = timelineCardOf(cardTitle != null ? cardTitle : title,"
+        + "      cardImage != null ? cardImage : imagePath, cardQuery != null ? cardQuery : query);"
+        + "  });"
+        + "  timelineAnswer.closed = true;"
+        + "  return timelineAnswer.card || timelineCardOf(title, imagePath, query);"
+        + "});")
+    private static native void nativeSetTimelineShare(String title, String imagePath, String query, NativeProvider provider);
+
+    @JSBody(params = {"chatMenu", "timelineMenu"}, script = ""
+        + "var shownMenus = [];"
+        + "if (chatMenu) shownMenus.push('shareAppMessage');"
+        + "if (timelineMenu) shownMenus.push('shareTimeline');"
+        + "wx.showShareMenu({menus: shownMenus});")
+    private static native void nativeShowShareMenu(boolean chatMenu, boolean timelineMenu);
 
     @JSBody(params = "listener", script = ""
         + "function deliverQuery(enterOptions) {"
