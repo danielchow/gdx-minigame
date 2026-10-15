@@ -65,9 +65,9 @@ LibGDX Game (Java/Kotlin)
 |---------|----------|
 | `bindings/` | WX API wrappers (`WX.java`, `WXAudioContext.java`, `WXCanvas.java`), ad wrappers (`WXAdUtils.java`, `WXCustomAd.java`, `WXInterstitialAd.java`, `WXRewardedVideoAd.java`), callbacks (touch, audio, keyboard, lifecycle, onHide, ad events) |
 | `config/backend/` | `MiniGameBackend.java` — generates all WeChat output files via `TemplateUtil`; `TemplateUtil.java` — `${var}` placeholder loader |
-| `config/` | `MiniGameBuildConfiguration.java` — user-facing config class (appId, description, orientation, etc.). Add new config fields here; `MiniGameBackend` consumes them. |
+| `config/` | `MiniGameBuildConfiguration.java` — standalone fields currently not consumed by `MiniGameBackend`. Builds use the fields/setters on `MiniGameBackend`; keep new supported build settings there until the configuration object is wired in. |
 | `config/plugins/` | TeaVM plugins (class filter, class transformer, JavaObject exporter) |
-| `filesystem/` | File storage (`FileDB.java`, `MemoryFileStorage.java`, `PersistentFileStorage.java`, `FileData.java`, `HEXCoder.java`), storage types (classpath, internal) |
+| `filesystem/` | File storage (`FileDB.java`, `PersistentFileStorage.java`, `FileData.java`, `HEXCoder.java`), storage types (classpath, internal) |
 | `gl/` | WebGL extension interfaces |
 | `dom/` | DOM emulation (TeaVM navigator) |
 | `utils/` | `KeyCodes.java`, `Timer.java`, `PNG.java` |
@@ -77,6 +77,8 @@ LibGDX Game (Java/Kotlin)
 
 | Path | Contents |
 |------|---------|
+| `docs/limitations.md` | Current platform constraints, unsupported backend contracts, and fallback behavior |
+| `backlog/wx-api-gap/INDEX.md` | Verified unresolved API/backend issues with severity and status |
 | `references/api-index.md` | Index of all 904 WeChat API docs across 22 categories |
 | `references/wechat-minigame/` | 19 WeChat technical guides (QuickStart, TechPrinciple, adapters, FAQ) |
 | `references/wx-api-docs/` | Full WeChat minigame API docs organized by category |
