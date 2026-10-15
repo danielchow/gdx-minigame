@@ -13,7 +13,6 @@ import org.teavm.jso.JSBody;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.core.JSArrayReader;
 import org.teavm.jso.dom.events.Touch;
-import org.teavm.jso.dom.html.HTMLCanvasElement;
 
 /**
  * Input implementation for WeChat Mini Game.
@@ -25,7 +24,7 @@ public class MiniGameInput extends AbstractInput {
     private static final int MAX_TOUCHES = 20;
 
     private final MiniGameApplication app;
-    private final HTMLCanvasElement canvas;
+    private final MiniGameGraphics graphics;
 
     private boolean[] touched = new boolean[MAX_TOUCHES];
     private int[] touchX = new int[MAX_TOUCHES];
@@ -43,16 +42,9 @@ public class MiniGameInput extends AbstractInput {
     private int mouseLastY = 0;
     private long currentEventTimeStamp = 0;
 
-    // Cached scale factors for touch coordinate mapping
-    private float touchScaleX;
-    private float touchScaleY;
-
-    public MiniGameInput(MiniGameApplication app, HTMLCanvasElement canvas) {
+    public MiniGameInput(MiniGameApplication app, MiniGameGraphics graphics) {
         this.app = app;
-        this.canvas = canvas;
-        // Cache scale factors: canvas physical pixels / CSS pixels
-        touchScaleX = (float) canvas.getWidth() / (float) WX.getScreenWidth();
-        touchScaleY = (float) canvas.getHeight() / (float) WX.getScreenHeight();
+        this.graphics = graphics;
         setupTouchEvents();
     }
 
@@ -83,8 +75,8 @@ public class MiniGameInput extends AbstractInput {
         for (int i = 0; i < changedTouches.getLength(); i++) {
             Touch touch = changedTouches.get(i);
             int real = touch.getIdentifier();
-            int x = Math.round((float) touch.getClientX() * touchScaleX);
-            int y = Math.round((float) touch.getClientY() * touchScaleY);
+            int x = Math.round((float) touch.getClientX() * graphics.getTouchScaleX());
+            int y = Math.round((float) touch.getClientY() * graphics.getTouchScaleY());
 
             if (type == 0) { // TOUCH_DOWN
                 int touchId;

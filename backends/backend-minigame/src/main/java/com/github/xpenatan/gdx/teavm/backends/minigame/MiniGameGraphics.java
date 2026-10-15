@@ -30,6 +30,7 @@ import org.teavm.jso.webgl.WebGLRenderingContext;
  * - No CSS cursor manipulation
  * - Screen size via wx.getSystemInfoSync() instead of screen.*
  * - Density from wx.getWindowInfo().pixelRatio, cached, instead of devicePixelRatio
+ * - Canvas sized from wx.getWindowInfo() window size, following wx.onWindowResize
  */
 public class MiniGameGraphics implements Graphics {
 
@@ -54,22 +55,20 @@ public class MiniGameGraphics implements Graphics {
     private int safeInsetLeft;
     private int safeInsetBottom;
     private int safeInsetRight;
+    // Logical size of the window the canvas fills; touches arrive in these units.
+    private double windowWidth;
+    private double windowHeight;
 
     public MiniGameGraphics(MiniGameApplicationConfiguration config) {
         this.config = config;
         this.canvas = (HTMLCanvasElement) config.canvas;
 
-        // Scale canvas to physical pixels for proper viewport sizing
-        // (wx.createCanvas() returns logical pixels, but game expects physical pixels
-        //  like the web backend provides)
+        // The canvas is sized in physical pixels, like the web backend provides, from the window
+        // as it is now: wx.createCanvas() ran in game.js before the subpackages loaded, and
+        // desktop WeChat can still be opening its window then, which left a squashed canvas
+        // that WeChat stretched over the final window.
         updateWindowMetrics();
         WX.onWindowResize((LifecycleCallback) result -> updateWindowMetrics());
-        if (pixelRatio > 1.0) {
-            int w = (int)(canvas.getWidth() * pixelRatio);
-            int h = (int)(canvas.getHeight() * pixelRatio);
-            canvas.setWidth(w);
-            canvas.setHeight(h);
-        }
 
         WebGLContextAttributesExt attr = (WebGLContextAttributesExt) WebGLContextAttributes.create();
         attr.setAlpha(config.alpha);
@@ -232,10 +231,25 @@ public class MiniGameGraphics implements Graphics {
         return pixelRatio;
     }
 
-    /** Re-reads pixel ratio and safe area from one wx.getWindowInfo() call; insets in physical pixels. */
+    /** Canvas pixels per logical window pixel, for mapping touch coordinates. */
+    public float getTouchScaleX() { return (float) (canvas.getWidth() / windowWidth); }
+
+    public float getTouchScaleY() { return (float) (canvas.getHeight() / windowHeight); }
+
+    /**
+     * Re-reads pixel ratio, window size and safe area from one wx.getWindowInfo() call, and sizes
+     * the canvas to the window in physical pixels; insets in physical pixels.
+     */
     protected void updateWindowMetrics() {
         WXWindowInfo info = WX.getWindowInfo();
         pixelRatio = info.getPixelRatio();
+        windowWidth = info.getWindowWidth();
+        windowHeight = info.getWindowHeight();
+        int width = (int) (windowWidth * pixelRatio);
+        int height = (int) (windowHeight * pixelRatio);
+        // Assigning a size clears the drawing buffer even when it is unchanged.
+        if (canvas.getWidth() != width) canvas.setWidth(width);
+        if (canvas.getHeight() != height) canvas.setHeight(height);
         WXWindowInfo.SafeArea safeArea = info.getSafeArea();
         if (safeArea == null) {
             safeInsetTop = safeInsetLeft = safeInsetBottom = safeInsetRight = 0;

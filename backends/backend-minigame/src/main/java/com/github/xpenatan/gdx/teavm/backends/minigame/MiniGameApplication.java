@@ -108,7 +108,7 @@ public class MiniGameApplication implements Application {
         }
 
         graphics = createGraphics(config);
-        input = new MiniGameInput(this, graphics.canvas);
+        input = new MiniGameInput(this, graphics);
         files = new MiniGameFiles(config, this);
         net = new MiniGameNet();
         logger = new WebApplicationLogger();

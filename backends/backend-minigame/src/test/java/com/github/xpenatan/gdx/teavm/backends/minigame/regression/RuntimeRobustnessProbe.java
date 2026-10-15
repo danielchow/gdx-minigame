@@ -32,6 +32,8 @@ public final class RuntimeRobustnessProbe {
                     @Override
                     public boolean touchDown(int x, int y, int pointer, int button) {
                         record("touchDown", pointer);
+                        record("pointerX", x);
+                        record("pointerY", y);
                         return true;
                     }
 
@@ -48,6 +50,12 @@ public final class RuntimeRobustnessProbe {
                     }
                 });
                 record("create", 0);
+            }
+
+            @Override
+            public void resize(int width, int height) {
+                record("resizeWidth", width);
+                record("resizeHeight", height);
             }
 
             @Override
@@ -103,6 +111,7 @@ public final class RuntimeRobustnessProbe {
                 case "setWindowedMode": return Gdx.graphics.setWindowedMode(arg, arg * 2) ? 1 : 0;
                 case "supportsDisplayModeChange": return Gdx.graphics.supportsDisplayModeChange() ? 1 : 0;
                 case "graphicsWidth": return Gdx.graphics.getWidth();
+                case "graphicsHeight": return Gdx.graphics.getHeight();
                 case "readWindowMetrics": {
                     int sum = 0;
                     for (int i = 0; i < arg; i++) {

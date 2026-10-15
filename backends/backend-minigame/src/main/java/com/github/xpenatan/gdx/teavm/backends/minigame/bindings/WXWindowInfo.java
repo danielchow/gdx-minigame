@@ -17,6 +17,13 @@ public interface WXWindowInfo extends JSObject {
     @JSProperty
     double getScreenHeight();
 
+    /** The usable window, which the screen canvas fills and touch coordinates are relative to. */
+    @JSProperty
+    double getWindowWidth();
+
+    @JSProperty
+    double getWindowHeight();
+
     /** Null on platforms that report no safe area. */
     @JSProperty
     SafeArea getSafeArea();

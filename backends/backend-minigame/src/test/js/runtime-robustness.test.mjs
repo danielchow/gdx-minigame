@@ -40,7 +40,11 @@ function noopProxy(values = {}) {
     return new Proxy(values, {get: (target, key) => key in target ? target[key] : () => null});
 }
 
-function startProbe(platform = 'devtools', console = noopProxy()) {
+/**
+ * `canvas` is the size wx.createCanvas() returned in game.js; `window` overrides wx.getWindowInfo()
+ * at startup.
+ */
+function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canvasSize, window = {}} = {}) {
     const frames = [];
     const listeners = {};
     const contexts = [];
@@ -52,7 +56,8 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
     const on = name => listener => (listeners[name] ??= []).push(listener);
     const gl = noopProxy({getParameter: () => 'WebGL 1.0 (probe)', getExtension: () => null,
         getSupportedExtensions: () => []});
-    const windowInfo = {pixelRatio: 1, screenWidth: 100, screenHeight: 200, safeArea: null, calls: 0};
+    const windowInfo = {pixelRatio: 1, screenWidth: 100, screenHeight: 200, windowWidth: 100, windowHeight: 200,
+        safeArea: null, calls: 0, ...window};
     const wx = noopProxy({
         getWindowInfo: () => {windowInfo.calls++; return {...windowInfo};},
         onWindowResize: on('windowResize'),
@@ -78,7 +83,7 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
         vibrateShort: options => vibrations.push(['short', options?.type]),
         vibrateLong: () => vibrations.push(['long']),
     });
-    const canvas = {width: 100, height: 200, getContext: () => gl};
+    const canvas = {width: 100, height: 200, ...canvasSize, getContext: () => gl};
     const context = vm.createContext({exports: {}, console, performance, wx, canvas, __robustnessProbe: report,
         requestAnimationFrame(callback) {frames.push(callback); return frames.length;},
         cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays});
@@ -98,7 +103,10 @@ function startProbe(platform = 'devtools', console = noopProxy()) {
             return queued.length;
         },
         pendingFrames: () => frames.length,
-        touch: (name, identifier) => fire(name, {changedTouches: [{identifier, clientX: 10, clientY: 20}]}),
+        touch: (name, identifier, clientX = 10, clientY = 20) =>
+            fire(name, {changedTouches: [{identifier, clientX, clientY}]}),
+        /** Values recorded for an event, in order. */
+        values: name => report.events.filter(e => e.startsWith(name + ':')).map(e => Number(e.slice(name.length + 1))),
     };
 }
 
@@ -251,6 +259,34 @@ test('the full-screen canvas cannot be resized through setWindowedMode', () => {
     assert.equal(probe.command('setWindowedMode', Math.floor(width / 2)), 0, 'setWindowedMode reports no change');
     probe.runFrames();
     assert.equal(probe.command('graphicsWidth'), width, 'the canvas keeps its size');
+});
+
+test('the canvas fills the window at launch even when wx.createCanvas() caught a squashed one', () => {
+    // Desktop WeChat can still be opening its window when game.js creates the canvas. WeChat then
+    // stretched that canvas over the final window, squashing the whole game (solitaire#9).
+    const probe = startProbe('mac', noopProxy(),
+        {canvas: {width: 800, height: 120}, window: {pixelRatio: 2, windowWidth: 800, windowHeight: 450}});
+    probe.runFrames();
+    assert.deepEqual([probe.command('graphicsWidth'), probe.command('graphicsHeight')], [1600, 900]);
+    assert.deepEqual([probe.values('resizeWidth'), probe.values('resizeHeight')], [[1600], [900]]);
+    probe.touch('touchstart', 1, 400, 225);
+    assert.deepEqual([probe.values('pointerX'), probe.values('pointerY')], [[800], [450]],
+        'touches map from logical window pixels to canvas pixels');
+});
+
+test('a window resize resizes the canvas, the app and touch mapping', () => {
+    const probe = startProbe('mac', noopProxy(), {window: {pixelRatio: 2}});
+    probe.runFrames();
+    assert.deepEqual([probe.command('graphicsWidth'), probe.command('graphicsHeight')], [200, 400]);
+    Object.assign(probe.windowInfo, {windowWidth: 300, windowHeight: 150});
+    probe.fire('windowResize', {windowWidth: 300, windowHeight: 150});
+    probe.runFrames();
+    assert.deepEqual([probe.values('resizeWidth'), probe.values('resizeHeight')], [[200, 600], [400, 300]]);
+    probe.touch('touchstart', 1, 150, 75);
+    assert.deepEqual([probe.values('pointerX'), probe.values('pointerY')], [[300], [150]]);
+    probe.fire('windowResize', {windowWidth: 300, windowHeight: 150});
+    probe.runFrames();
+    assert.deepEqual(probe.values('resizeWidth'), [200, 600], 'an unchanged size does not resize again');
 });
 
 test('density and safe insets are cached and refreshed on window resize', () => {
