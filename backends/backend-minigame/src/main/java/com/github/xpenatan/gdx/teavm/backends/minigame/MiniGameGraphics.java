@@ -42,6 +42,13 @@ public class MiniGameGraphics implements Graphics {
     protected GL30 gl30;
     protected GLVersion glVersion;
 
+    private boolean continuousRendering = true;
+    private Runnable frameRequester;
+
+    void setFrameRequester(Runnable frameRequester) {
+        this.frameRequester = frameRequester;
+    }
+
     float fps = 0;
     long lastTimeStamp = System.currentTimeMillis();
     long frameId = -1;
@@ -69,7 +76,10 @@ public class MiniGameGraphics implements Graphics {
         // desktop WeChat can still be opening its window then, which left a squashed canvas
         // that WeChat stretched over the final window.
         updateWindowMetrics(null);
-        WX.onWindowResize((LifecycleCallback) this::updateWindowMetrics);
+        WX.onWindowResize((LifecycleCallback) resize -> {
+            updateWindowMetrics(resize);
+            requestRendering();
+        });
 
         WebGLContextAttributesExt attr = (WebGLContextAttributesExt) WebGLContextAttributes.create();
         attr.setAlpha(config.alpha);
@@ -349,13 +359,18 @@ public class MiniGameGraphics implements Graphics {
     }
 
     @Override
-    public void setContinuousRendering(boolean isContinuous) {}
+    public void setContinuousRendering(boolean isContinuous) {
+        continuousRendering = isContinuous;
+        if (isContinuous) requestRendering();
+    }
 
     @Override
-    public boolean isContinuousRendering() { return true; }
+    public boolean isContinuousRendering() { return continuousRendering; }
 
     @Override
-    public void requestRendering() {}
+    public void requestRendering() {
+        if (frameRequester != null) frameRequester.run();
+    }
 
     @Override
     public boolean supportsExtension(String extensionName) {

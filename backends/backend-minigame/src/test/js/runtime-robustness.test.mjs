@@ -53,6 +53,16 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
     const vibrations = [];
     const exits = [];
     const report = {events: []};
+    const httpRequests = [];
+    class XMLHttpRequest {
+        static DONE = 4;
+        constructor() {this.readyState = 0; httpRequests.push(this);}
+        open() {}
+        send() {}
+        setRequestHeader() {}
+        getAllResponseHeaders() {return '';}
+        complete() {this.status = 200; this.responseText = '{}'; this.readyState = 4; this.onreadystatechange();}
+    }
     const on = name => listener => (listeners[name] ??= []).push(listener);
     const gl = noopProxy({getParameter: () => 'WebGL 1.0 (probe)', getExtension: () => null,
         getSupportedExtensions: () => []});
@@ -77,6 +87,7 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
         onAudioInterruptionBegin: on('interruptionBegin'), onAudioInterruptionEnd: on('interruptionEnd'),
         onTouchStart: on('touchstart'), onTouchMove: on('touchmove'),
         onTouchEnd: on('touchend'), onTouchCancel: on('touchcancel'),
+        onKeyDown: on('keydown'), onKeyUp: on('keyup'), onKeyboardInput: on('keyboardinput'),
         showModal: options => modals.push(options),
         restartMiniProgram: options => restarts.push(options),
         exitMiniProgram: options => exits.push(options),
@@ -84,7 +95,7 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
         vibrateLong: () => vibrations.push(['long']),
     });
     const canvas = {width: 100, height: 200, ...canvasSize, getContext: () => gl};
-    const context = vm.createContext({exports: {}, console, performance, wx, canvas, __robustnessProbe: report,
+    const context = vm.createContext({exports: {}, console, performance, wx, canvas, XMLHttpRequest, __robustnessProbe: report,
         requestAnimationFrame(callback) {frames.push(callback); return frames.length;},
         cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays});
     vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
@@ -94,7 +105,7 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
 
     const fire = (name, event) => {for (const listener of listeners[name] ?? []) listener(event);};
     return {
-        report, contexts, modals, restarts, vibrations, exits, listeners, fire, windowInfo,
+        report, contexts, modals, restarts, vibrations, exits, listeners, fire, windowInfo, httpRequests,
         command: (name, arg = 0) => report.command(name, arg),
         /** Runs every frame queued so far; returns how many ran. */
         runFrames() {
@@ -403,4 +414,150 @@ test('density matches the pixel ratio, as on Android, and ppi follows it', () =>
     assert.equal(probe.command('graphicsDensityTimes100'), 300);
     assert.equal(probe.command('ppiX'), 480);
     assert.equal(probe.command('ppiY'), 480);
+});
+
+
+test('on-demand requests coalesce, render next RAF, and stop scheduling when idle', () => {
+    const p = startProbe();
+    assert.equal(p.command('isContinuous'), 1, 'continuous is the compatibility default');
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 1);
+    p.command('continuous', 0);
+    const before = eventCount(p, 'render');
+    p.runFrames(); // the already-queued continuous callback is allowed to drain without drawing
+    assert.equal(eventCount(p, 'render'), before);
+    assert.equal(p.pendingFrames(), 0);
+    for (let i = 0; i < 20; i++) p.command('requestFrame');
+    assert.equal(eventCount(p, 'render'), before, 'request never renders synchronously');
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(eventCount(p, 'render'), before + 1);
+    assert.equal(p.pendingFrames(), 0);
+    p.command('requestInRender');
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 1, 'request during render survives consumption');
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 0);
+    p.command('continuous', 1);
+    p.command('requestFrame');
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 1, 'restoring continuous starts only one chain');
+});
+
+test('input, runnable, nested runnable, resize and JS timer wake a dormant loop', async () => {
+    const p = startProbe();
+    p.runFrames(); p.command('continuous', 0); p.runFrames();
+    for (const event of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+        p.touch(event, 1);
+        assert.equal(p.pendingFrames(), 1, event);
+        p.runFrames();
+        assert.equal(p.pendingFrames(), 0);
+    }
+    for (const event of ['keydown', 'keyup', 'keyboardinput']) {
+        p.fire(event, {});
+        assert.equal(p.pendingFrames(), 1, event);
+        p.runFrames();
+    }
+    p.command('postRunnable', 1);
+    assert.equal(eventCount(p, 'runnable'), 0);
+    p.runFrames();
+    assert.equal(eventCount(p, 'runnable'), 1);
+    assert.equal(eventCount(p, 'nestedRunnable'), 0);
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(eventCount(p, 'nestedRunnable'), 1);
+    assert.equal(p.pendingFrames(), 0);
+    p.fire('windowResize', {windowWidth: 300, windowHeight: 400});
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(p.values('resizeWidth').at(-1), 300);
+    await new Promise(resolve => setTimeout(() => {p.command('requestFrame'); resolve();}, 1));
+    assert.equal(p.pendingFrames(), 1, 'setTimeout may safely request the next RAF');
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 0);
+});
+
+test('hide suppresses queued callbacks and runnables, show resumes exactly one chain', () => {
+    const p = startProbe();
+    p.runFrames();
+    p.fire('hide');
+    const before = eventCount(p, 'render');
+    p.command('postRunnable');
+    p.runFrames(); // mock intentionally delivers even a cancelled RAF
+    assert.equal(eventCount(p, 'render'), before);
+    assert.equal(eventCount(p, 'runnable'), 0);
+    assert.equal(p.pendingFrames(), 0);
+    p.fire('show', {}); p.fire('show', {});
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(eventCount(p, 'runnable'), 1);
+    assert.equal(eventCount(p, 'render'), before + 1);
+    assert.equal(p.pendingFrames(), 1);
+});
+
+
+test('async asset completion wakes an idle loop without polling', async () => {
+    const p = startProbe();
+    p.runFrames(); p.command('continuous', 0); p.runFrames();
+    p.command('asyncCompletion');
+    assert.equal(p.pendingFrames(), 0);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(eventCount(p, 'async'), 1);
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 0);
+});
+
+
+test('HTTP completion wakes a dormant loop and hide/show rejects stale RAF delivery', () => {
+    const p = startProbe();
+    p.runFrames(); p.command('continuous', 0); p.runFrames();
+    p.command('httpRequest');
+    assert.equal(p.pendingFrames(), 0);
+    p.httpRequests[0].complete();
+    assert.deepEqual(p.values('http'), [200]);
+    assert.equal(p.pendingFrames(), 1);
+    p.fire('hide'); p.fire('show', {});
+    const before = eventCount(p, 'render');
+    p.runFrames(); // delivers both old cancelled and new callbacks
+    assert.equal(eventCount(p, 'render'), before + 1);
+    assert.equal(p.pendingFrames(), 0);
+});
+
+
+test('runnables posted before first RAF survive initialization and run after create', () => {
+    const p = startProbe();
+    p.command('continuous', 0);
+    p.command('postRunnable', 1);
+    assert.equal(p.pendingFrames(), 1);
+    assert.equal(eventCount(p, 'runnable'), 0);
+    p.runFrames();
+    assert.equal(eventCount(p, 'create'), 1);
+    assert.equal(eventCount(p, 'runnable'), 1);
+    assert(p.report.events.indexOf('create:0') < p.report.events.indexOf('runnable:0'));
+    assert.equal(eventCount(p, 'nestedRunnable'), 0);
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(eventCount(p, 'runnable'), 1);
+    assert.equal(eventCount(p, 'nestedRunnable'), 1);
+    assert.equal(p.pendingFrames(), 0);
+});
+
+
+test('music completion and error wake a dormant loop', () => {
+    const p = startProbe();
+    p.runFrames(); p.command('continuous', 0); p.runFrames();
+    p.command('musicCompletion', 0);
+    p.command('playMusic', 0);
+    musicContext(p, 0).end();
+    assert.equal(eventCount(p, 'musicComplete'), 1);
+    assert.equal(p.command('musicPlaying', 0), 0);
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    p.command('playMusic', 0);
+    musicContext(p, 0).errors[0]();
+    assert.equal(p.command('musicPlaying', 0), 0);
+    assert.equal(p.pendingFrames(), 1);
+    p.runFrames();
+    assert.equal(p.pendingFrames(), 0);
 });

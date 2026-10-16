@@ -1,7 +1,15 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame.regression;
 
+import com.badlogic.gdx.assets.AssetDescriptor;
+import com.badlogic.gdx.assets.AssetLoaderParameters;
+import com.badlogic.gdx.assets.AssetManager;
+import com.badlogic.gdx.assets.loaders.AsynchronousAssetLoader;
+import com.badlogic.gdx.utils.Array;
+import emu.com.badlogic.gdx.assets.AssetLoadingTask;
+import emu.com.badlogic.gdx.utils.async.AsyncExecutor;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Net;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.files.FileHandle;
@@ -23,6 +31,7 @@ import org.teavm.jso.JSObject;
  */
 public final class RuntimeRobustnessProbe {
     private static boolean throwOnRender;
+    private static boolean requestInRender;
 
     public static void main(String[] args) {
         MiniGameApplication app = new MiniGameApplication(new ApplicationAdapter() {
@@ -71,6 +80,10 @@ public final class RuntimeRobustnessProbe {
             @Override
             public void render() {
                 record("render", 0);
+                if (requestInRender) {
+                    requestInRender = false;
+                    Gdx.graphics.requestRendering();
+                }
                 if (throwOnRender) throw new IllegalStateException("expected-probe-failure");
             }
         }, new MiniGameApplicationConfiguration()) {
@@ -95,6 +108,36 @@ public final class RuntimeRobustnessProbe {
 
         register((command, arg) -> {
             switch (command) {
+                case "httpRequest": {
+                    Net.HttpRequest request = new Net.HttpRequest("GET");
+                    request.setUrl("https://example.test/config");
+                    Gdx.net.sendHttpRequest(request, new Net.HttpResponseListener() {
+                        public void handleHttpResponse(Net.HttpResponse response) { record("http", response.getStatus().getStatusCode()); }
+                        public void failed(Throwable failure) { record("httpFailure", 0); }
+                        public void cancelled() { record("httpCancelled", 0); }
+                    });
+                    return 0;
+                }
+                case "asyncCompletion": {
+                    AsyncExecutor executor = new AsyncExecutor(1);
+                    AssetManager manager = new AssetManager();
+                    AsynchronousAssetLoader<Object, AssetLoaderParameters<Object>> loader =
+                        new AsynchronousAssetLoader<Object, AssetLoaderParameters<Object>>(FileHandle::new) {
+                            public Array<AssetDescriptor> getDependencies(String name, FileHandle file, AssetLoaderParameters<Object> params) { return null; }
+                            public void loadAsync(AssetManager assets, String name, FileHandle file, AssetLoaderParameters<Object> params) { record("async", 0); }
+                            public Object loadSync(AssetManager assets, String name, FileHandle file, AssetLoaderParameters<Object> params) { return new Object(); }
+                        };
+                    executor.submit(new AssetLoadingTask(manager, new AssetDescriptor<>("probe", Object.class), loader, executor));
+                    return 0;
+                }
+                case "continuous": Gdx.graphics.setContinuousRendering(arg != 0); return 0;
+                case "isContinuous": return Gdx.graphics.isContinuousRendering() ? 1 : 0;
+                case "requestFrame": Gdx.graphics.requestRendering(); return 0;
+                case "requestInRender": requestInRender = true; Gdx.graphics.requestRendering(); return 0;
+                case "postRunnable": Gdx.app.postRunnable(() -> {
+                    record("runnable", 0);
+                    if (arg != 0) Gdx.app.postRunnable(() -> record("nestedRunnable", 0));
+                }); return 0;
                 case "playSound": return (int) sound.play();
                 case "loopSound": return (int) sound.loop();
                 case "playOtherSound": return (int) otherSound.play();
@@ -102,6 +145,7 @@ public final class RuntimeRobustnessProbe {
                 case "resumeSound": sound.resume(arg); return 0;
                 case "stopSound": sound.stop(arg); return 0;
                 case "stopAllSounds": sound.stop(); return 0;
+                case "musicCompletion": music[arg].setOnCompletionListener(ended -> record("musicComplete", 0)); return 0;
                 case "playMusic": music[arg].play(); return 0;
                 case "pauseMusic": music[arg].pause(); return 0;
                 case "musicPlaying": return music[arg].isPlaying() ? 1 : 0;

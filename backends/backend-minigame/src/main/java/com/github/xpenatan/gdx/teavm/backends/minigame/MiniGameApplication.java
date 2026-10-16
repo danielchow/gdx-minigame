@@ -25,7 +25,6 @@ import com.github.xpenatan.jmultiplatform.core.JPlatformMap;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSExceptions;
 import org.teavm.jso.JSObject;
-import org.teavm.jso.browser.AnimationFrameCallback;
 
 import java.util.ArrayList;
 
@@ -74,6 +73,10 @@ public class MiniGameApplication implements Application {
 
     private boolean stepError;
     private boolean hidden;
+    private boolean renderRequested = true;
+    private boolean frameRunning;
+    private int pendingFrame = -1;
+    private int frameGeneration;
 
     public MiniGameApplication(ApplicationListener appListener, MiniGameApplicationConfiguration config) {
         this.config = config;
@@ -108,6 +111,7 @@ public class MiniGameApplication implements Application {
         }
 
         graphics = createGraphics(config);
+        graphics.setFrameRequester(this::requestRendering);
         input = new MiniGameInput(this, graphics);
         files = new MiniGameFiles(config, this);
         net = new MiniGameNet();
@@ -143,23 +147,34 @@ public class MiniGameApplication implements Application {
         WX.onAudioInterruptionBegin((OnHideCallback) () -> audio.onInterruptionBegin());
         WX.onAudioInterruptionEnd((OnHideCallback) () -> audio.onInterruptionEnd());
 
-        // Game loop
-        Runnable appLoop = new Runnable() {
-            @Override
-            public void run() {
-                step(curListener);
-                if (!stepError) {
-                    WX.requestAnimationFrame(callback -> this.run());
-                }
-            }
-        };
+        requestRendering();
+    }
 
-        // Start
-        WX.requestAnimationFrame(callback -> {
-            step(curListener);
-            if (!stepError) {
-                initState = AppState.APP_LOOP;
-                WX.requestAnimationFrame(callback1 -> appLoop.run());
+    /** Coalesces requests from input, postRunnable and JS timers into the next RAF. */
+    private void requestRendering() {
+        renderRequested = true;
+        scheduleFrame();
+    }
+
+    private void scheduleFrame() {
+        if (hidden || stepError || frameRunning || pendingFrame != -1) return;
+        if (!renderRequested && !graphics.isContinuousRendering()) return;
+        final int generation = ++frameGeneration;
+        pendingFrame = WX.requestAnimationFrame(timestamp -> {
+            // Cancellation can race an already-delivered callback on some hosts.
+            if (generation != frameGeneration) return;
+            pendingFrame = -1;
+            if (hidden || stepError) return;
+            if (!renderRequested && !graphics.isContinuousRendering()) return;
+            // Consume BEFORE rendering: a request from create/render/a runnable is for the
+            // following frame. TeaVM may suspend step while an asset task completes.
+            renderRequested = false;
+            frameRunning = true;
+            try {
+                step(curListener);
+            } finally {
+                frameRunning = false;
+                scheduleFrame();
             }
         });
     }
@@ -168,6 +183,9 @@ public class MiniGameApplication implements Application {
     private void hide() {
         if (hidden) return;
         hidden = true;
+        ++frameGeneration;
+        if (pendingFrame != -1) WX.cancelAnimationFrame(pendingFrame);
+        pendingFrame = -1;
         if (initState == AppState.APP_LOOP) {
             synchronized (lifecycleListeners) {
                 for (LifecycleListener listener : lifecycleListeners) {
@@ -184,7 +202,10 @@ public class MiniGameApplication implements Application {
         // Before the listeners, so music they start plays immediately. Also on a show without a
         // hide: it ends an audio interruption whose end event was missed.
         audio.onShow();
-        if (!hidden) return;
+        if (!hidden) {
+            requestRendering();
+            return;
+        }
         hidden = false;
         if (initState == AppState.APP_LOOP) {
             synchronized (lifecycleListeners) {
@@ -194,6 +215,7 @@ public class MiniGameApplication implements Application {
             }
             if (curListener != null) curListener.resume();
         }
+        requestRendering();
     }
 
     private void step(ApplicationListener appListener) {
@@ -209,7 +231,8 @@ public class MiniGameApplication implements Application {
                 initState = AppState.APP_LOOP;
                 input.setInputProcessor(null);
                 input.reset();
-                runnables.clear();
+                // Keep work posted after construction but before this first RAF: it must
+                // execute after create, just like work posted by create itself.
                 graphics.frameId = 0;
                 appListener.create();
                 resizeBypass = true;
@@ -446,6 +469,7 @@ public class MiniGameApplication implements Application {
     @Override
     public void postRunnable(Runnable runnable) {
         runnables.add(runnable);
+        graphics.requestRendering();
     }
 
     /** Closes the mini game through wx.exitMiniProgram, where the base library has it. */

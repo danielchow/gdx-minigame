@@ -1,6 +1,7 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame;
 
 import com.badlogic.gdx.Audio;
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.audio.AudioDevice;
 import com.badlogic.gdx.audio.AudioRecorder;
 import com.badlogic.gdx.files.FileHandle;
@@ -402,13 +403,16 @@ public class MiniGameAudio implements Audio {
 
             audioContext.onEnded(() -> {
                 isPlaying = false;
-                if (completionListener != null) {
-                    completionListener.onCompletion(MiniGameMusic.this);
+                try {
+                    if (completionListener != null) completionListener.onCompletion(MiniGameMusic.this);
+                } finally {
+                    if (Gdx.graphics != null) Gdx.graphics.requestRendering();
                 }
             });
 
             audioContext.onError(() -> {
                 isPlaying = false;
+                if (Gdx.graphics != null) Gdx.graphics.requestRendering();
             });
             audio.musics.add(this);
         }

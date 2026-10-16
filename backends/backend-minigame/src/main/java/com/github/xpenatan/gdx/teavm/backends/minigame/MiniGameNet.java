@@ -1,6 +1,7 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame;
 
 import com.badlogic.gdx.Net;
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.net.*;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.StreamUtils;
@@ -107,6 +108,9 @@ public class MiniGameNet implements Net {
             } catch (Exception e) {
                 httpResponseListeners.remove(httpRequest);
                 httpResponseListener.failed(e);
+            } finally {
+                if (request.getReadyState() == org.teavm.jso.ajax.XMLHttpRequest.DONE && Gdx.graphics != null)
+                    Gdx.graphics.requestRendering();
             }
         });
 
@@ -148,8 +152,12 @@ public class MiniGameNet implements Net {
     public void cancelHttpRequest(HttpRequest httpRequest) {
         HttpResponseListener listener = httpResponseListeners.get(httpRequest);
         if (listener != null) {
-            listener.cancelled();
-            httpResponseListeners.remove(httpRequest);
+            try {
+                listener.cancelled();
+            } finally {
+                httpResponseListeners.remove(httpRequest);
+                if (Gdx.graphics != null) Gdx.graphics.requestRendering();
+            }
         }
     }
 

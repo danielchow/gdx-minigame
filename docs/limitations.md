@@ -39,8 +39,25 @@ WeChat supports desktop clients. The backend follows `wx.onWindowResize` for can
 
 The current graphics backend still leaves title, decoration, resizability, VSync and cursor setters as no-ops; `newCursor` returns null. `setWindowedMode` returns false. Input cursor capture/position are also no-ops, rotation reports zero and native orientation reports Portrait. These describe backend behavior, not proof that every corresponding desktop feature is unavailable in WeChat.
 
-Rendering is continuous: `setContinuousRendering` and `requestRendering` have no effect, while `setForegroundFPS` is a no-op despite an existing `WX.setPreferredFramesPerSecond` binding. These are backend choices or missing adaptations. `getVersion` returns zero; exposing SDKVersion would be a separate API decision, not an established integer mapping.
+Rendering is continuous by default; `setContinuousRendering(false)` and `requestRendering` support on-demand frames (see below). `setForegroundFPS` remains a no-op despite an existing `WX.setPreferredFramesPerSecond` binding. `getVersion` returns zero; exposing SDKVersion would be a separate API decision, not an established integer mapping.
 
 `Application.exit` already calls `wx.exitMiniProgram` when available. It is not an empty lifecycle stub. Local files already use PersistentFileStorage under `USER_DATA_PATH`; they are not inherently lost on restart.
 
 Sources: [graphics](../backends/backend-minigame/src/main/java/com/github/xpenatan/gdx/teavm/backends/minigame/MiniGameGraphics.java) (62–98, 130–149, 241–261, 297–363), [application](../backends/backend-minigame/src/main/java/com/github/xpenatan/gdx/teavm/backends/minigame/MiniGameApplication.java) (133–165, 417–428, 451–454), [WX frame-rate binding](../backends/backend-minigame/src/main/java/com/github/xpenatan/gdx/teavm/backends/minigame/bindings/WX.java) (64–67), [file storage selection](../backends/backend-minigame/src/main/java/com/github/xpenatan/gdx/teavm/backends/minigame/MiniGameFiles.java) (23–25), and [build configuration](../backends/backend-minigame/src/main/java/com/github/xpenatan/gdx/teavm/backends/minigame/config/backend/MiniGameBackend.java) (39–62, 176–180).
+
+## On-demand rendering
+
+`Graphics.setContinuousRendering(false)` stops the MiniGame RAF chain once the current frame
+finishes. `requestRendering()` coalesces calls into one frame on the next RAF, including calls
+from a bare `setTimeout` callback; it never draws synchronously. This is the deadline API for
+JS event-loop pacers: schedule `Gdx.graphics.requestRendering()` with `setTimeout`, cancel or
+replace the timer in the consumer. No DOM Window or Java thread is required. Continuous
+rendering remains the default. Input, `postRunnable`, window resize, show and async asset/HTTP/music
+completion wake the loop. Requests from a frame or a runnable are preserved for the next
+frame. Hide/minimize cancels RAF in both continuous and on-demand modes, and preserves queued work for show/restore.
+This intentionally stops hidden simulator rendering too, matching phone host suspension.
+`postRunnable` work queued after construction but before the first RAF is retained and runs
+after `ApplicationListener.create`, rather than being discarded at initialization. Hardware key
+and text events wake frames, but this does not add LibGDX hardware-key translation (still
+unsupported). Node regressions cover scheduling; retained-canvas visibility with
+`preserveDrawingBuffer=false` must also be checked on real WeChat hosts.

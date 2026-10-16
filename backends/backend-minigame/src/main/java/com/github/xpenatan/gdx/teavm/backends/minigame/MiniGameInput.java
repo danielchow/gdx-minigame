@@ -46,7 +46,15 @@ public class MiniGameInput extends AbstractInput {
         this.app = app;
         this.graphics = graphics;
         setupTouchEvents();
+        // Hardware-key processing is not implemented by this backend yet, but native key/text
+        // events must still wake consumers that observe them through wx bindings.
+        registerKeyWakeups(() -> graphics.requestRendering());
     }
+
+    @JSBody(params = "wake", script = "if (typeof wx.onKeyDown === 'function') wx.onKeyDown(wake); "
+        + "if (typeof wx.onKeyUp === 'function') wx.onKeyUp(wake); "
+        + "if (typeof wx.onKeyboardInput === 'function') wx.onKeyboardInput(wake);")
+    private static native void registerKeyWakeups(org.teavm.jso.browser.TimerHandler wake);
 
     private void setupTouchEvents() {
         WX.onTouchStart((TouchCallback) event -> handleTouchEvent(event, 0));
@@ -66,6 +74,7 @@ public class MiniGameInput extends AbstractInput {
     }
 
     private void handleTouchEvent(JSObject event, int type) {
+        graphics.requestRendering();
         currentEventTimeStamp = TimeUtils.nanoTime();
         JSArrayReader<Touch> changedTouches = getChangedTouches(event);
         if (changedTouches == null) return;

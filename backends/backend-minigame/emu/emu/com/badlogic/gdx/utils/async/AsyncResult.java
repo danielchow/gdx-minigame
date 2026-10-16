@@ -1,6 +1,7 @@
 package emu.com.badlogic.gdx.utils.async;
 
 import emu.com.badlogic.gdx.assets.AssetLoadingTask;
+import com.badlogic.gdx.Gdx;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.browser.TimerHandler;
 
@@ -53,6 +54,7 @@ public class AsyncResult<T> implements TimerHandler {
             failure = e;
         } finally {
             isDone = true;
+            if (Gdx.graphics != null) Gdx.graphics.requestRendering();
         }
     }
 }
