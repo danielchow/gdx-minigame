@@ -181,7 +181,7 @@ public class MiniGameAudio implements Audio {
 
     private static String toAssetPath(String path) {
         if (path.startsWith("assets/")) return path;
-        return "assets/" + path;
+        return MiniGameAssetPackages.root(path) + path;
     }
 
     @Override

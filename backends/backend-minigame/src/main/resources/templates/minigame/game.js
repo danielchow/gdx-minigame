@@ -89,9 +89,6 @@ if (typeof wx.onUnhandledRejection === 'function') wx.onUnhandledRejection(onSta
 
 // Helper: load a subpackage; on failure, ask the player to retry and load it again.
 function loadSubpackage(name) {
-    if (typeof wx.loadSubpackage !== 'function') {
-        return Promise.resolve();
-    }
     return new Promise(function(resolve) {
         function attempt() {
             var task = wx.loadSubpackage({
@@ -112,6 +109,15 @@ function loadSubpackage(name) {
 }
 
 async function startGame() {
+    // Every generated build uses subpackages. An unsupported host cannot recover by retrying.
+    if (typeof wx.loadSubpackage !== 'function') {
+        startupFinished = true;
+        wx.showModal({title: '', content: '请更新微信后重试', showCancel: false, confirmText: '退出',
+            complete: function() {
+                if (typeof wx.exitMiniProgram === 'function') wx.exitMiniProgram({});
+            }});
+        return;
+    }
     kickWatchdog();
     try {
         // Phase 0: Install setter on window.Gdx so we get notified
@@ -153,8 +159,11 @@ async function startGame() {
         // Reads preload.txt and rename-map.json during the I/O wait phase
         // so Java's InternalStorage finds them in cache instead of reading from disk
         var assetsReadyPromise = assetsPromise.then(function() {
+            // WeChat require() accepts JavaScript modules, not JSON files.
+            var fsm = wx.getFileSystemManager();
+            var packageIndex = JSON.parse(fsm.readFileSync('assets/asset-packages.json', 'utf-8'));
+            globalThis.__miniGameAssetPackages = require('./asset-packages').create(wx, packageIndex);
             try {
-                var fsm = wx.getFileSystemManager();
                 globalThis.__preloadedTextFiles = {};
                 try { globalThis.__preloadedTextFiles['assets/preload.txt'] = fsm.readFileSync('assets/preload.txt', 'utf-8'); } catch(e) {}
                 try { globalThis.__preloadedTextFiles['assets/rename-map.json'] = fsm.readFileSync('assets/rename-map.json', 'utf-8'); } catch(e) {}

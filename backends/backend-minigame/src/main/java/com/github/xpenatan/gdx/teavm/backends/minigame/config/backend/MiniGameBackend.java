@@ -46,6 +46,16 @@ public class MiniGameBackend extends TeaBackend {
     public String targetFileName = "app";
     public String mainClassArgs = "";
     public AssetFilter scriptFilter;
+    private Map<String, java.util.List<String>> deferredAssetPackages = Map.of();
+
+    /** Optional asset-only groups. Selectors are logical files, directory prefixes ending in '/', or stem prefixes ending in '.'. */
+    public MiniGameBackend setDeferredAssetPackages(Map<String, java.util.List<String>> groups) {
+        AssetPackages.validate(groups);
+        Map<String, java.util.List<String>> copy = new TreeMap<>();
+        groups.forEach((name, paths) -> copy.put(name, java.util.List.copyOf(paths)));
+        deferredAssetPackages = copy;
+        return this;
+    }
 
     public MiniGameBackend setAppId(String appId) {
         this.appId = appId;
@@ -179,6 +189,7 @@ public class MiniGameBackend extends TeaBackend {
         generateGameJs(data);
         generateAdapter();
         generateFirstScreen();
+        releasePath.child("asset-packages.js").writeString(TemplateUtil.resolve("asset-packages.js", Map.of()), false, "UTF-8");
     }
 
     /**
@@ -186,7 +197,8 @@ public class MiniGameBackend extends TeaBackend {
      */
     private void generateGameJson() {
         String json = TemplateUtil.resolve("game.json",
-            Map.of("orientation", orientation,
+            Map.of("assetPackages", AssetPackages.declarations(deferredAssetPackages),
+                "orientation", orientation,
                 "desktopOrientation", desktopOrientation != null ? desktopOrientation : orientation,
                 "displayMode", displayMode != null ? "\n    \"displayMode\": \"" + displayMode + "\"," : ""));
         FileHandle gameJson = releasePath.child("game.json");
@@ -347,6 +359,7 @@ public class MiniGameBackend extends TeaBackend {
 
         // Rename files with blocked extensions for WeChat readFileSync compatibility
         renameBlockedExtensions();
+        AssetPackages.split(releasePath, deferredAssetPackages);
     }
 
     /**

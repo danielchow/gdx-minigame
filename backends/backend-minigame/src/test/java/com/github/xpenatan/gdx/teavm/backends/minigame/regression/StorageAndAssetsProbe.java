@@ -16,6 +16,7 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameApplicationConfig
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAssetDownloader;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAssetLoader;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameFiles;
+import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAssetPackages;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGamePreferences;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetLoaderListener;
@@ -33,6 +34,7 @@ public final class StorageAndAssetsProbe {
         Gdx.files = new MiniGameFiles(new MiniGameApplicationConfiguration(), null);
         AssetInstance.setInstance(new MiniGameAssetLoader());
         AssetInstance.setInstance(new MiniGameAssetDownloader());
+        if (args.length > 0 && args[0].equals("packages")) { packageFiles(); return; }
         run("loader", StorageAndAssetsProbe::loaderListeners);
         run("downloader", StorageAndAssetsProbe::downloaderListeners);
         run("manager", StorageAndAssetsProbe::assetManager);
@@ -40,6 +42,27 @@ public final class StorageAndAssetsProbe {
         run("encoded-preferences", StorageAndAssetsProbe::encodedPreferences);
         run("file-handle", StorageAndAssetsProbe::fileHandles);
         result("main", "complete");
+    }
+
+    private static void packageFiles() {
+        FileHandle file = Gdx.files.internal("theme/regal/card.custom");
+        result("before-exists", String.valueOf(file.exists()));
+        result("before-length", String.valueOf(file.length()));
+        result("directory", String.valueOf(file.parent().isDirectory()));
+        result("listed", file.parent().list()[0].path());
+        try { file.readBytes(); result("early-read", "unexpected"); }
+        catch (RuntimeException error) { result("early-read", "blocked"); }
+        MiniGameAssetPackages.load("theme/regal/card.custom", ready -> {
+            result("ready", String.valueOf(ready));
+            result("after-exists", String.valueOf(file.exists()));
+            if (ready) result("contents", file.readString());
+        });
+        MiniGameAssetLoader loader = new MiniGameAssetLoader();
+        result("loader-before", String.valueOf(loader.isAssetLoaded(FileType.Internal, file.path())));
+        loader.loadAsset(file.path(), AssetType.Binary, FileType.Internal, listener("optional-loader"));
+        result("loader-queue", String.valueOf(loader.isAssetInQueueOrDownloading(file.path())));
+        result("loader-count", String.valueOf(loader.getDownloadingCount()));
+        result("loading", String.valueOf(MiniGameAssetPackages.isLoading(file.path())));
     }
 
     private static void run(String name, Runnable section) {

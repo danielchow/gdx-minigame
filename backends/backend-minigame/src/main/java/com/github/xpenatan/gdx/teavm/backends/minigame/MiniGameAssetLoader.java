@@ -11,9 +11,8 @@ import org.teavm.jso.typedarrays.Int8Array;
 
 /**
  * AssetLoader for WeChat Mini Game. Every asset ships in the package: InternalStorage lists
- * them from assets/preload.txt at startup and reads their contents on demand through
- * wx.getFileSystemManager(). There are no runtime downloads, so a file that doesn't exist
- * has failed to load.
+ * them from assets/preload.txt at startup. Optional packages are loaded before reading;
+ * InternalStorage routes logical paths to their current package roots.
  */
 public class MiniGameAssetLoader implements AssetLoader {
 
@@ -35,17 +34,17 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public boolean isAssetInQueueOrDownloading(String path) {
-        return false;
+        return MiniGameAssetPackages.isLoading(path);
     }
 
     @Override
     public boolean isAssetLoaded(FileType fileType, String path) {
-        return Gdx.files.getFileHandle(path, fileType).exists();
+        return !isDeferredMissing(fileType, path) && Gdx.files.getFileHandle(path, fileType).exists();
     }
 
     @Override
     public void loadAsset(String path, AssetType assetType, FileType fileType) {
-        // No-op: packaged assets are already readable through Gdx.files
+        if (isDeferredMissing(fileType, path)) MiniGameAssetPackages.load(path, ready -> { });
     }
 
     @Override
@@ -55,7 +54,14 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public void loadAsset(String path, AssetType assetType, FileType fileType, AssetLoaderListener<WebBlob> listener, boolean overwrite) {
-        // Nothing to download or overwrite: report the packaged file, or failure if there is none
+        if (isDeferredMissing(fileType, path)) {
+            MiniGameAssetPackages.load(path, ready -> {
+                if (ready) loadAsset(path, assetType, fileType, listener, overwrite);
+                else if (listener != null) listener.onFailure(path);
+            });
+            return;
+        }
+        // Read only after the containing package has loaded.
         if (listener == null) return;
         FileHandle file = Gdx.files.getFileHandle(path, fileType);
         if (!file.exists() || file.isDirectory()) {
@@ -64,6 +70,10 @@ public class MiniGameAssetLoader implements AssetLoader {
         }
         Int8Array data = Int8Array.copyFromJavaArray(file.readBytes());
         listener.onSuccess(path, new WebBlob(data.getBuffer(), data));
+    }
+
+    private static boolean isDeferredMissing(FileType type, String path) {
+        return (type == FileType.Internal || type == FileType.Classpath) && MiniGameAssetPackages.isMissing(path);
     }
 
     @Override
@@ -84,11 +94,11 @@ public class MiniGameAssetLoader implements AssetLoader {
 
     @Override
     public int getDownloadingCount() {
-        return 0;
+        return MiniGameAssetPackages.downloadingCount();
     }
 
     @Override
     public boolean isDownloading() {
-        return false;
+        return getDownloadingCount() > 0;
     }
 }

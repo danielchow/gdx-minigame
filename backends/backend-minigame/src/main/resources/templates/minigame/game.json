@@ -10,6 +10,6 @@
     "subpackages": [
         { "name": "engine", "root": "subpackages/engine/" },
         { "name": "game", "root": "subpackages/game/" },
-        { "name": "assets", "root": "assets/" }
+        { "name": "assets", "root": "assets/" }${assetPackages}
     ]
 }

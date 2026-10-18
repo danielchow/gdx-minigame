@@ -1,5 +1,7 @@
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const {create} = createRequire(import.meta.url)('../../main/resources/templates/minigame/asset-packages.js');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -13,10 +15,11 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
  * Runs game.js against a mocked wx. Each subpackage name maps to a list of outcomes, one per
  * wx.loadSubpackage call: 'fail', or a function run as the subpackage script before success.
  */
-function startGame(outcomes, {mainError, mainCallbackError, console = quiet} = {}) {
+function startGame(outcomes, {mainError, mainCallbackError, packageIndex = '{}', unsupported = false, console = quiet} = {}) {
     const loads = [];
     const modals = [];
     const restarts = [];
+    const exits = [];
     const timers = [];
     const rejectionListeners = [];
     const mainCalls = [];
@@ -24,7 +27,11 @@ function startGame(outcomes, {mainError, mainCallbackError, console = quiet} = {
         setTimeout(callback, delay) {timers.push({callback, delay}); return timers.length;},
         clearTimeout(id) {if (timers[id - 1]) timers[id - 1].cleared = true;}});
     vm.runInContext('var window = globalThis;', context);
-    context.require = name => name.includes('adapter') ? {setup() {}} : {start() {}, redraw() {}};
+    context.require = name => {
+        if (name === './asset-packages') return {create};
+        if (name.endsWith('.json')) throw new Error('WeChat cannot require JSON');
+        return name.includes('adapter') ? {setup() {}} : {start() {}, redraw() {}};
+    };
     const defaultScripts = {
         engine: () => {context.window.Gdx = {};},
         game: () => {context.__gameApp = {main(args, callback) {
@@ -36,11 +43,12 @@ function startGame(outcomes, {mainError, mainCallbackError, console = quiet} = {
     };
     context.wx = {
         createCanvas: () => ({width: 1, height: 1}),
-        getFileSystemManager: () => ({readFileSync() {throw new Error('missing');}}),
+        getFileSystemManager: () => ({readFileSync(path) {if (path === 'assets/asset-packages.json') {if (packageIndex === null) throw new Error('missing index'); return packageIndex;} throw new Error('missing');}}),
         onUnhandledRejection: listener => rejectionListeners.push(listener),
         offUnhandledRejection() {},
         showModal: options => modals.push(options),
         restartMiniProgram: options => restarts.push(options),
+        exitMiniProgram: options => exits.push(options),
         loadSubpackage(options) {
             loads.push(options.name);
             const outcome = (outcomes[options.name] ?? []).shift() ?? defaultScripts[options.name];
@@ -54,8 +62,9 @@ function startGame(outcomes, {mainError, mainCallbackError, console = quiet} = {
             return {onProgressUpdate() {}};
         },
     };
+    if (unsupported) delete context.wx.loadSubpackage;
     vm.runInContext(readFileSync(gameJs, 'utf8'), context, {filename: 'game.js'});
-    return {context, loads, modals, restarts, timers, mainCalls, rejectionListeners,
+    return {context, loads, modals, restarts, exits, timers, mainCalls, rejectionListeners,
         fireTimers() {for (const timer of timers.splice(0)) if (!timer.cleared) timer.callback();}};
 }
 
@@ -148,4 +157,34 @@ test('a successful startup logs nothing', async () => {
     await settleAll();
     assert.equal(game.mainCalls.length, 1);
     assert.deepEqual(calls, []);
+});
+
+
+test('startup reads the optional index through the filesystem, never require(JSON)', async () => {
+    const game = startGame({}, {packageIndex: '{"theme/regal/cards.atlas":"regal"}'});
+    await settleAll();
+    assert.equal(game.mainCalls.length, 1);
+    assert.equal(game.context.__miniGameAssetPackages.isMissing('theme/regal/cards.atlas'), true);
+    assert.equal(game.context.__miniGameAssetPackages.isMissing('default.png'), false);
+});
+for (const packageIndex of [null, '{broken']) {
+    test('a missing or invalid optional index fails startup rather than assuming common files: ' + packageIndex, async () => {
+        const game = startGame({}, {packageIndex});
+        await settleAll();
+        assert.equal(game.mainCalls.length, 0);
+        assert.equal(game.modals.length, 1);
+    });
+}
+test('a host without subpackage support asks to update and exits, with no retry loop', async () => {
+    const game = startGame({}, {unsupported: true});
+    await settleAll();
+    assert.equal(game.loads.length, 0);
+    assert.equal(game.mainCalls.length, 0);
+    assert.equal(game.modals.length, 1);
+    assert.equal(game.modals[0].confirmText, '退出');
+    game.modals[0].complete({confirm: true});
+    assert.equal(game.exits.length, 1);
+    assert.equal(game.restarts.length, 0);
+    game.fireTimers();
+    assert.equal(game.modals.length, 1);
 });

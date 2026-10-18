@@ -149,7 +149,7 @@ See [Template System](#template-system) for the full guide.
 
 ## Template System
 
-`MiniGameBackend.java` generates 8 output files at build time. Instead of embedding JS/JSON as Java string concatenation, each output is a **template resource file** under `src/main/resources/templates/minigame/` with `${var}` placeholders substituted at build time by `TemplateUtil`.
+`MiniGameBackend.java` generates the output files below at build time. Instead of embedding JS/JSON as Java string concatenation, each output is a **template resource file** under `src/main/resources/templates/minigame/` with `${var}` placeholders substituted at build time by `TemplateUtil`.
 
 ### How it works
 
@@ -169,8 +169,9 @@ build/dist/minigame/game.json        Final output with placeholder replaced
 |---|---|---|---|
 | `adapter.js` | `adapter.js` | `generateAdapter()` | none |
 | `first-screen.js` | `first-screen.js` | `generateFirstScreen()` | none |
+| `asset-packages.js` | `asset-packages.js` | `setupMinigame()` | none |
 | `game.js` | `game.js` | `generateGameJs()` | `${mainClassArgs}` |
-| `game.json` | `game.json` | `generateGameJson()` | `${orientation}` |
+| `game.json` | `game.json` | `generateGameJson()` | `${orientation}`, `${desktopOrientation}`, `${displayMode}`, `${assetPackages}` |
 | `project.config.json` | `project.config.json` | `generateProjectConfigJson()` | `${description}`, `${appId}` |
 | `subpackage-engine.js` | `subpackages/engine/game.js` | `generateSubpackageEntryFiles()` | none |
 | `subpackage-game.js` | `subpackages/game/game.js` | `generateSubpackageEntryFiles()` | `${targetFileName}` ×2 |

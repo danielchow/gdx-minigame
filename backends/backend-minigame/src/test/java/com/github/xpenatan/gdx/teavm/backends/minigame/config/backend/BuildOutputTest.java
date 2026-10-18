@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
 import org.junit.Rule;
@@ -39,6 +40,20 @@ public class BuildOutputTest {
 
     private static String read(File file) throws IOException {
         return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+    }
+
+    @Test
+    public void optionalPackagesRenderAlongsideMandatoryRootsAndShipTheirRuntime() throws IOException {
+        String json = TemplateUtil.resolve("game.json", Map.of("orientation", "portrait",
+            "desktopOrientation", "portrait", "displayMode", "",
+            "assetPackages", AssetPackages.declarations(Map.of("regal", List.of("theme/regal/")))));
+        JsonValue packages = new JsonReader().parse(json).get("subpackages");
+        assertEquals(4, packages.size);
+        assertEquals("assets/", packages.get(2).getString("root"));
+        assertEquals("regal", packages.get(3).getString("name"));
+        assertEquals("optional/regal/", packages.get(3).getString("root"));
+        assertEquals(TemplateUtil.resolve("asset-packages.js", Map.of()),
+            read(new File(probe("storage-and-assets"), "asset-packages.js")));
     }
 
     @Test

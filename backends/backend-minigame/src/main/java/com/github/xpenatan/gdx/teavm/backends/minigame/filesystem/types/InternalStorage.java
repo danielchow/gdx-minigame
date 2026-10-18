@@ -1,6 +1,7 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types;
 
 import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameAssetPackages;
 import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameFileHandle;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.FileDB;
@@ -63,16 +64,17 @@ public class InternalStorage extends FileDB {
 
     /**
      * Convert a logical file path to the WeChat filesystem path.
-     * Applies rename-map lookup first, then prepends "assets/".
+     * Uses the logical path to choose its package root, then applies blocked-extension renaming.
      */
     private String toWXPath(String relativePath) {
         String normalized = normalize(relativePath);
+        String root = MiniGameAssetPackages.root(normalized);
         // Check rename map
         String renamed = renameMap.get(normalized);
         if (renamed != null) {
             normalized = renamed;
         }
-        return "assets/" + normalized;
+        return root + normalized;
     }
 
     // ── Manifest loading ────────────────────────────────────────────
@@ -204,6 +206,8 @@ public class InternalStorage extends FileDB {
     public byte[] readBytes(MiniGameFileHandle file) {
         String normalized = normalize(file.path());
         if (!filePaths.contains(normalized)) return null;
+        if (MiniGameAssetPackages.isMissing(normalized))
+            throw new GdxRuntimeException("Asset package is not loaded: " + normalized);
         String wxPath = toWXPath(file.path());
         ArrayBuffer ab = WX.fsReadFileSync(fsm, wxPath);
         if (ab == null) return null;
@@ -272,7 +276,7 @@ public class InternalStorage extends FileDB {
     public boolean exists(MiniGameFileHandle file) {
         if (isRoot(file.path())) return true;
         String normalized = normalize(file.path());
-        return filePaths.contains(normalized) || dirPaths.contains(normalized);
+        return (filePaths.contains(normalized) && !MiniGameAssetPackages.isMissing(normalized)) || dirPaths.contains(normalized);
     }
 
     @Override
@@ -289,7 +293,7 @@ public class InternalStorage extends FileDB {
     public long length(MiniGameFileHandle file) {
         String normalized = normalize(file.path());
         if (dirPaths.contains(normalized)) return 0;
-        if (!filePaths.contains(normalized)) return 0;
+        if (!filePaths.contains(normalized) || MiniGameAssetPackages.isMissing(normalized)) return 0;
         String wxPath = toWXPath(file.path());
         return (long) WX.fsFileSize(fsm, wxPath);
     }
