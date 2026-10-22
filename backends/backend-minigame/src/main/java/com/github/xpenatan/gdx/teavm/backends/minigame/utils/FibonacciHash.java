@@ -54,7 +54,11 @@ public final class FibonacciHash {
         return (lo >>> shift) | (hi << (32 - shift));
     }
 
-    /** The high word of the signed 64-bit product {@code (long)a * b}; Hacker's Delight 8-2, mulhs. */
+    /**
+     * The high word of the signed 64-bit product {@code (long)a * b} (Hacker's Delight 8-2, mulhs). It is
+     * only used, and only verified, with {@code b == LO}: {@code FibonacciHashTest} checks every a for that
+     * constant. The 16-bit partial sums stay below 2^31 for any b, but that is not tested beyond LO.
+     */
     static int mulHighSigned(int a, int b) {
         int aLo = a & 0xFFFF;
         int aHi = a >> 16;

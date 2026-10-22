@@ -63,12 +63,13 @@ Within `com.badlogic.gdx.*`, every method whose program contains the multiplier 
 entry block that jumps to it, and may add `nop`s), the chain connected variable by variable, the
 multiplicand either the int key, one call on the object key, or `key ^ key >>> 32` for a long key,
 and nothing else in the block. Any deviation is a `Diagnostics` error carrying the method listing,
-which `TeaBackend.logBuild` turns into "Build Failed". In addition, every class in
-`PLACE_CLASSES` must, when it is compiled, have an `int place(key)` that contains no long
-arithmetic (no long constant, long operation or conversion from or to long) after the rewrite.
-That is the property we need, so a libGDX that hashes with another long expression fails, while
-one that hashes with ints alone (IdentityMap in 1.14.2) passes without a rewrite. Classes outside
-libGDX are never rewritten: game code that happens to use the constant is left alone.
+which `TeaBackend.logBuild` turns into "Build Failed". In addition, within
+`com.badlogic.gdx.utils.*`, every one-parameter `int place(key)` (including a subclass override)
+must contain no long arithmetic (no long constant, long operation or conversion from or to long)
+after the rewrite. That is the property we need, not a list of class names: a libGDX that adds
+a collection hashing with another long constant, or changes one to, fails; one that hashes with
+ints alone (IdentityMap in 1.14.2) passes without a rewrite. Classes outside libGDX are never
+rewritten: game code that happens to use the constant is left alone.
 
 ### Equivalence
 
@@ -93,9 +94,12 @@ For `LongMap`, the folded key `k = key ^ key >>> 32` has words `keyHi : keyLo ^ 
 
 Tests (`FibonacciHashTransformerTest`, JVM): the transformer runs on the real libGDX classes
 parsed by TeaVM from the test classpath; every collection ends up long-free and calling the
-helper with its hash producer intact, a `place()` with an extra instruction or with a different
-long constant is rejected with the listing, and a class outside libGDX that uses the constant is
-untouched.
+helper with its hash producer intact; rejected with the listing are a `place()` with an extra
+instruction, the multiplier in a method that is not `place()` (as if inlined into `get()`), a
+long key folded differently, and a libGDX-package collection the transformer has never seen that
+hashes with another constant (`BrokenHashMap`); a class outside libGDX that uses the constant is
+untouched. `HashGuardBuildTest` checks that a real `TeaCompiler.build` of a probe using
+`BrokenHashMap` fails with "Build Failed" on that diagnostic and writes no game.
 
 Tests (`FibonacciHashTest`, JVM): `place(hash, 32)`, the product's high word, is checked for
 **every** int (2^32 cases, about 4 s); all shift counts from -70 to 130 with edge and random

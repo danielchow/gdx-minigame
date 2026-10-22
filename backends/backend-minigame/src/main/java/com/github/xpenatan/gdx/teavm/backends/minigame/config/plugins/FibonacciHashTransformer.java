@@ -40,34 +40,17 @@ import org.teavm.model.text.ListingBuilder;
  * {@code System.identityHashCode()}, the int key) and the {@code shift} field read stay as they are.
  * <p>
  * The rewrite is guarded: within {@code com.badlogic.gdx.*}, every method that uses the multiplier
- * must be a {@code place()} of exactly the known shape, and every class listed in
- * {@link #PLACE_CLASSES} must, when it is compiled, have a {@code place()} that is free of long
- * arithmetic afterwards. Anything else is a build error with the method's listing, so a libGDX
- * upgrade that changes the hashing fails loudly instead of silently allocating again. Game code
- * outside libGDX is never rewritten.
+ * must be a {@code place()} of exactly the known shape, and within {@code com.badlogic.gdx.utils.*}
+ * every one-parameter {@code int place(key)} must be free of long arithmetic afterwards. Anything
+ * else is a build error with the method's listing, so a libGDX upgrade that changes the hashing, or
+ * adds a collection that hashes with another long constant, fails loudly instead of silently
+ * allocating again. Game code outside libGDX is never rewritten.
  */
 public final class FibonacciHashTransformer implements ClassHolderTransformer {
     private static final String GDX_PACKAGE = "com.badlogic.gdx.";
+    /** Where the hash collections live; every place() here must end up without long arithmetic. */
+    private static final String COLLECTIONS_PACKAGE = "com.badlogic.gdx.utils.";
     private static final String SHIFT_FIELD = "shift";
-
-    /**
-     * The libGDX classes that hash keys in {@code place()}; each must end up without long arithmetic. In 1.14.0
-     * all of them use the multiplier (the whole gdx jar was scanned by bytecode); 1.14.2 adds LongSet and
-     * changes IdentityMap to an int-only {@code identityHashCode(item) >>> shift}, which needs no rewrite.
-     */
-    static final Set<String> PLACE_CLASSES = Set.of(
-        "com.badlogic.gdx.utils.IdentityMap",
-        "com.badlogic.gdx.utils.IntFloatMap",
-        "com.badlogic.gdx.utils.IntIntMap",
-        "com.badlogic.gdx.utils.IntMap",
-        "com.badlogic.gdx.utils.IntSet",
-        "com.badlogic.gdx.utils.LongMap",
-        "com.badlogic.gdx.utils.LongSet",
-        "com.badlogic.gdx.utils.ObjectFloatMap",
-        "com.badlogic.gdx.utils.ObjectIntMap",
-        "com.badlogic.gdx.utils.ObjectLongMap",
-        "com.badlogic.gdx.utils.ObjectMap",
-        "com.badlogic.gdx.utils.ObjectSet");
 
     private static final MethodReference PLACE = new MethodReference(FibonacciHash.class.getName(), "place",
         ValueType.INTEGER, ValueType.INTEGER, ValueType.INTEGER);
@@ -81,7 +64,7 @@ public final class FibonacciHashTransformer implements ClassHolderTransformer {
         }
         for(MethodHolder method : cls.getMethods()) {
             Program program = method.getProgram();
-            if(program == null || callsFibonacciHash(program) || !usesMultiplier(program)) {
+            if(program == null || !usesMultiplier(program)) {
                 continue;
             }
             String problem = rewrite(method, program);
@@ -92,29 +75,22 @@ public final class FibonacciHashTransformer implements ClassHolderTransformer {
                         + " libGDX version or drop it; the method listing is:\n" + listing(program));
             }
         }
-        if(PLACE_CLASSES.contains(cls.getName())) {
-            MethodHolder place = findPlace(cls);
-            if(place == null) {
-                context.getDiagnostics().error(null, "FibonacciHashTransformer: " + cls.getName()
-                    + " has no int place(key) method. Update PLACE_CLASSES for this libGDX version.");
-            }
-            else if(usesLongArithmetic(place.getProgram())) {
-                context.getDiagnostics().error(new CallLocation(place.getReference()), "FibonacciHashTransformer: "
-                    + place.getReference() + " still computes with long after the rewrite, so every lookup would"
+        if(!cls.getName().startsWith(COLLECTIONS_PACKAGE)) {
+            return;
+        }
+        for(MethodHolder method : cls.getMethods()) {
+            if(isPlace(method) && usesLongArithmetic(method.getProgram())) {
+                context.getDiagnostics().error(new CallLocation(method.getReference()), "FibonacciHashTransformer: "
+                    + method.getReference() + " still computes with long after the rewrite, so every lookup would"
                     + " allocate BigInts. Update the transformer for this libGDX version; the method listing is:\n"
-                    + listing(place.getProgram()));
+                    + listing(method.getProgram()));
             }
         }
     }
 
-    private static MethodHolder findPlace(ClassHolder cls) {
-        for(MethodHolder method : cls.getMethods()) {
-            if(method.getName().equals("place") && method.parameterCount() == 1
-                && method.getResultType().equals(ValueType.INTEGER) && method.getProgram() != null) {
-                return method;
-            }
-        }
-        return null;
+    private static boolean isPlace(MethodHolder method) {
+        return method.getName().equals("place") && method.parameterCount() == 1
+            && method.getResultType().equals(ValueType.INTEGER) && method.getProgram() != null;
     }
 
     /** Whether the program has a long constant, a long operation or a conversion from or to long. */
@@ -152,18 +128,6 @@ public final class FibonacciHashTransformer implements ClassHolderTransformer {
         return false;
     }
 
-    private static boolean callsFibonacciHash(Program program) {
-        for(BasicBlock block : program.getBasicBlocks()) {
-            for(Instruction instruction : block) {
-                if(instruction instanceof InvokeInstruction
-                    && ((InvokeInstruction)instruction).getMethod().getClassName().equals(FibonacciHash.class.getName())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private static boolean isMultiplier(Instruction instruction) {
         return instruction instanceof LongConstantInstruction
             && ((LongConstantInstruction)instruction).getConstant() == FibonacciHash.MULTIPLIER;
@@ -189,8 +153,7 @@ public final class FibonacciHashTransformer implements ClassHolderTransformer {
      * or {@code r = FibonacciHash.placeLong(key, s)}.
      */
     private static String rewrite(MethodHolder method, Program program) {
-        if(!method.getName().equals("place") || method.parameterCount() != 1
-            || !method.getResultType().equals(ValueType.INTEGER)) {
+        if(!isPlace(method)) {
             return "not an int place(key) method";
         }
         // TeaVM's parser puts the body in one block, after an entry block that only jumps to it.
@@ -349,14 +312,18 @@ public final class FibonacciHashTransformer implements ClassHolderTransformer {
         return null;
     }
 
+    /** Whether the call is {@code key.hashCode()} or {@code System.identityHashCode(key)}. */
     private static boolean hashesKey(InvokeInstruction call, Variable key) {
-        if(call.getReceiver() == null) {
+        MethodReference method = call.getMethod();
+        if(call.getReceiver() == null || !method.getReturnType().equals(ValueType.INTEGER)) {
             return false;
         }
         if(call.getInstance() == key) {
-            return call.getArguments().isEmpty();
+            return method.getName().equals("hashCode") && call.getArguments().isEmpty();
         }
-        return call.getInstance() == null && call.getArguments().size() == 1 && call.getArguments().get(0) == key;
+        return call.getInstance() == null && method.getClassName().equals("java.lang.System")
+            && method.getName().equals("identityHashCode") && call.getArguments().size() == 1
+            && call.getArguments().get(0) == key;
     }
 
     /** The instruction of the block that defines the variable, or null. */

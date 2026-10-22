@@ -29,14 +29,19 @@ import org.teavm.model.instructions.IntegerConstantInstruction;
 import org.teavm.model.instructions.InvokeInstruction;
 import org.teavm.model.instructions.LongConstantInstruction;
 import org.teavm.model.instructions.NumericOperandType;
+import org.teavm.model.util.ProgramUtils;
 import org.teavm.parsing.ClasspathClassHolderSource;
 
 /**
  * Runs the transformer on the real libGDX classes, parsed by TeaVM from the test classpath, and on
- * damaged copies of them, without a full compilation. TeaVMBuilder hands transformers pre-optimized
+ * damaged copies and fakes of them, without a full compilation. TeaVMBuilder hands transformers pre-optimized
  * programs (copies propagated), so the test reads through the same PreOptimizingClassHolderSource.
  */
 public class FibonacciHashTransformerTest {
+    /** The libGDX 1.14.0 collections that hash with the multiplier (the whole gdx jar was scanned by bytecode). */
+    private static final List<String> COLLECTIONS = List.of("IdentityMap", "IntFloatMap", "IntIntMap", "IntMap", "IntSet",
+        "LongMap", "ObjectFloatMap", "ObjectIntMap", "ObjectLongMap", "ObjectMap", "ObjectSet");
+
     private final ClassHolderSource source =
         new PreOptimizingClassHolderSource(new ClasspathClassHolderSource(new ReferenceCache()));
     private final List<String> errors = new ArrayList<>();
@@ -89,22 +94,21 @@ public class FibonacciHashTransformerTest {
 
     @Test
     public void rewritesEveryCollectionToAnIntCall() {
-        for(String name : FibonacciHashTransformer.PLACE_CLASSES) {
+        for(String simpleName : COLLECTIONS) {
+            String name = "com.badlogic.gdx.utils." + simpleName;
             ClassHolder cls = source.get(name);
-            if(cls == null) {
-                continue; // LongSet is not in the libGDX this backend compiles against
-            }
+            assertNotNull(name, cls);
             MethodHolder place = place(cls);
             assertTrue(name + " before", usesLong(place.getProgram()));
             new FibonacciHashTransformer().transformClass(cls, context);
             assertEquals(name, List.of(), errors);
             assertFalse(name + " after", usesLong(place.getProgram()));
-            String helper = name.endsWith(".LongMap") || name.endsWith(".LongSet") ? "placeLong" : "place";
+            String helper = simpleName.equals("LongMap") ? "placeLong" : "place";
             assertTrue(name + " calls FibonacciHash." + helper, callsHelper(place.getProgram(), helper));
             // The hash producer survived: an object key is still hashed by a call, an int key is used directly.
-            assertEquals(name, !name.contains(".Int") && !name.contains(".Long"), invokes(place.getProgram()) == 2);
+            boolean objectKey = !simpleName.startsWith("Int") && !simpleName.startsWith("Long");
+            assertEquals(name, objectKey ? 2 : 1, invokes(place.getProgram()));
         }
-        assertNotNull(source.get("com.badlogic.gdx.utils.ObjectMap"));
     }
 
     @Test
@@ -128,21 +132,54 @@ public class FibonacciHashTransformerTest {
     }
 
     @Test
-    public void rejectsAPlaceThatHashesWithAnotherLongConstant() {
-        ClassHolder cls = source.get("com.badlogic.gdx.utils.IntMap");
+    public void rejectsACollectionThatHashesWithAnotherLongConstant() {
+        // A libGDX-package collection the transformer has never heard of, hashing with another constant.
+        ClassHolder cls = source.get("com.badlogic.gdx.utils.BrokenHashMap");
+        Program program = place(cls).getProgram();
+
+        new FibonacciHashTransformer().transformClass(cls, context);
+
+        assertEquals(errors.toString(), 1, errors.size());
+        assertTrue(errors.get(0), errors.get(0).contains("BrokenHashMap.place(Ljava/lang/Object;)I still computes with long"));
+        assertTrue(errors.get(0), errors.get(0).contains("-4417276706812531889L"));
+        assertTrue(usesLong(program));
+    }
+
+    @Test
+    public void rejectsTheMultiplierOutsideAPlaceMethod() {
+        // As if place() had been inlined into get(): the same program under another name.
+        ClassHolder cls = new ClassHolder("com.badlogic.gdx.utils.InlinedMap");
+        MethodHolder get = new MethodHolder("get", ValueType.object("java.lang.Object"), ValueType.INTEGER);
+        get.setProgram(ProgramUtils.copy(place(source.get("com.badlogic.gdx.utils.ObjectMap")).getProgram()));
+        cls.addMethod(get);
+
+        new FibonacciHashTransformer().transformClass(cls, context);
+
+        assertEquals(errors.toString(), 1, errors.size());
+        assertTrue(errors.get(0), errors.get(0).contains("InlinedMap.get(Ljava/lang/Object;)I uses the Fibonacci hashing multiplier"
+            + " but is not the known place() shape (not an int place(key) method)"));
+        assertTrue(usesLong(get.getProgram()));
+    }
+
+    @Test
+    public void rejectsALongKeyFoldedDifferently() {
+        ClassHolder cls = source.get("com.badlogic.gdx.utils.LongMap");
         Program program = place(cls).getProgram();
         for(BasicBlock block : program.getBasicBlocks()) {
             for(Instruction instruction : block) {
-                if(instruction instanceof LongConstantInstruction) {
-                    ((LongConstantInstruction)instruction).setConstant(0x9E3779B97F4A7C13L);
+                if(instruction instanceof IntegerConstantInstruction) {
+                    ((IntegerConstantInstruction)instruction).setConstant(31); // key ^ key >>> 31
                 }
             }
         }
 
         new FibonacciHashTransformer().transformClass(cls, context);
 
-        assertEquals(1, errors.size());
-        assertTrue(errors.get(0), errors.get(0).contains("IntMap.place(I)I still computes with long"));
+        assertEquals(errors.toString(), 2, errors.size());
+        assertTrue(errors.get(0), errors.get(0).contains("LongMap.place(J)I uses the Fibonacci hashing multiplier"
+            + " but is not the known place() shape (a long key must be folded as key ^ key >>> 32)"));
+        assertTrue(errors.get(1), errors.get(1).contains("LongMap.place(J)I still computes with long"));
+        assertTrue(usesLong(program));
     }
 
     @Test

@@ -2,7 +2,14 @@ package com.github.xpenatan.gdx.teavm.backends.minigame.regression;
 
 import com.github.xpenatan.gdx.teavm.backends.minigame.config.backend.MiniGameBackend;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.compiler.TeaCompiler;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import org.teavm.vm.TeaVMOptimizationLevel;
 
 /**
@@ -21,6 +28,44 @@ public final class RegressionProbeBuilder {
         build(FreeTypeGlyphProbe.class, new File(outputRoot, "freetype-glyph"));
         build(ShareProbe.class, new File(outputRoot, "share"));
         build(HashPlaceProbe.class, new File(outputRoot, "hash-place"));
+        // Outside the probe root: the Node tests sweep every probe there for a built game.
+        buildExpectingHashGuardFailure(BrokenHashProbe.class, new File(outputRoot.getParentFile(), "regression-probe-failures/broken-hash"));
+    }
+
+    /**
+     * Builds a probe whose libGDX-package collection hashes with an unknown long constant. The build
+     * must fail on FibonacciHashTransformer's diagnostics; the captured log goes to build-failure.log
+     * for HashGuardBuildTest, and an unexpected success is an error.
+     */
+    private static void buildExpectingHashGuardFailure(Class<?> probe, File output) {
+        PrintStream originalErr = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) {
+                captured.write(b);
+                originalErr.write(b);
+            }
+        }, true));
+        String failure;
+        try {
+            build(probe, output);
+            failure = null;
+        } catch(RuntimeException expected) {
+            failure = expected.getMessage();
+        } finally {
+            System.setErr(originalErr);
+        }
+        if(failure == null) {
+            throw new IllegalStateException(probe.getSimpleName() + " built although its place() hashes with long");
+        }
+        output.mkdirs();
+        try {
+            Files.writeString(new File(output, "build-failure.log").toPath(),
+                "exception: " + failure + "\n" + captured.toString(StandardCharsets.UTF_8));
+        } catch(IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static void build(Class<?> probe, File output) {
