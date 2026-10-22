@@ -20,6 +20,7 @@ public final class RegressionProbeBuilder {
         build(StorageAndAssetsProbe.class, new File(outputRoot, "storage-and-assets"));
         build(FreeTypeGlyphProbe.class, new File(outputRoot, "freetype-glyph"));
         build(ShareProbe.class, new File(outputRoot, "share"));
+        build(HashPlaceProbe.class, new File(outputRoot, "hash-place"));
     }
 
     private static void build(Class<?> probe, File output) {

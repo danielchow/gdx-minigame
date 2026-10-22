@@ -7,7 +7,7 @@ import org.teavm.vm.spi.TeaVMPlugin;
 
 /**
  * TeaVM plugin for the minigame backend.
- * Installs class transformer for @Emulate annotations and JavaObjectExporter.
+ * Installs class transformer for @Emulate annotations, the allocation-free hash placement and JavaObjectExporter.
  */
 @Before(JSOPlugin.class)
 public class MiniGamePlugin implements TeaVMPlugin {
@@ -15,6 +15,7 @@ public class MiniGamePlugin implements TeaVMPlugin {
     @Override
     public void install(TeaVMHost host) {
         host.add(new MiniGameClassTransformer());
+        host.add(new FibonacciHashTransformer());
         host.add(new JavaObjectExporterDependency());
     }
 }
