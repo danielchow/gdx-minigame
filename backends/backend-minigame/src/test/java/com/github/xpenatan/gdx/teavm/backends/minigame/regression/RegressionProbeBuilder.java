@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.List;
 import org.teavm.vm.TeaVMOptimizationLevel;
 
 /**
@@ -76,6 +77,7 @@ public final class RegressionProbeBuilder {
         // A desktop orientation marks the probe that stands for a PC-ready game.
         new TeaCompiler(new MiniGameBackend().setAppId(probe.getSimpleName())
                 .setDesktopOrientation(desktopOrientation)
+                .setParallelPreloadSubpackages(desktopOrientation != null ? List.of("engine", "game", "assets") : List.of())
                 .setDisplayMode(desktopOrientation != null ? "desktop" : null))
             .setMainClass(probe.getName())
             .setOptimizationLevel(TeaVMOptimizationLevel.ADVANCED)

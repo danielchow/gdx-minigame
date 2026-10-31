@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -44,9 +45,8 @@ public class BuildOutputTest {
 
     @Test
     public void optionalPackagesRenderAlongsideMandatoryRootsAndShipTheirRuntime() throws IOException {
-        String json = TemplateUtil.resolve("game.json", Map.of("orientation", "portrait",
-            "desktopOrientation", "portrait", "displayMode", "",
-            "assetPackages", AssetPackages.declarations(Map.of("regal", List.of("theme/regal/")))));
+        String json = new MiniGameBackend()
+            .setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/"))).renderGameJson();
         JsonValue packages = new JsonReader().parse(json).get("subpackages");
         assertEquals(4, packages.size);
         assertEquals("assets/", packages.get(2).getString("root"));
@@ -54,6 +54,71 @@ public class BuildOutputTest {
         assertEquals("optional/regal/", packages.get(3).getString("root"));
         assertEquals(TemplateUtil.resolve("asset-packages.js", Map.of()),
             read(new File(probe("storage-and-assets"), "asset-packages.js")));
+    }
+
+    @Test
+    public void parallelPreloadDefaultAndEmptyKeepGameJsonByteIdentical() throws IOException {
+        String previous;
+        try (var fixture = getClass().getResourceAsStream("/game-default.json")) {
+            previous = new String(fixture.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        MiniGameBackend backend = new MiniGameBackend();
+        assertEquals(previous, backend.renderGameJson());
+        assertEquals(previous, backend.setParallelPreloadSubpackages(List.of()).renderGameJson());
+        assertEquals(previous, read(new File(probe("share"), "game.json")));
+
+        backend.setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/")));
+        String withoutPreload = backend.renderGameJson();
+        backend.setParallelPreloadSubpackages(List.of("engine", "regal"));
+        assertEquals(withoutPreload, backend.setParallelPreloadSubpackages(List.of()).renderGameJson());
+    }
+
+    @Test
+    public void parallelPreloadPreservesNamesAndOrderIncludingOptionalPackages() {
+        List<String> names = new ArrayList<>(List.of("regal", "game", "engine", "assets", "regal"));
+        MiniGameBackend backend = new MiniGameBackend().setParallelPreloadSubpackages(names)
+            .setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/")));
+        names.clear(); // The builder owns a copy, not the caller's mutable list.
+        JsonValue config = new JsonReader().parse(backend.renderGameJson());
+        JsonValue preload = config.get("parallelPreloadSubpackages");
+        assertEquals(5, preload.size);
+        int index = 0;
+        for (String expected : List.of("regal", "game", "engine", "assets", "regal")) {
+            assertEquals(1, preload.get(index).size);
+            assertEquals(expected, preload.get(index++).getString("name"));
+        }
+        assertEquals(4, config.get("subpackages").size);
+    }
+
+    @Test
+    public void parallelPreloadRejectsNamesAbsentFromFinalSubpackages() {
+        for (String unknown : List.of("typo", "subpackages/engine/", "")) {
+            assertUnknownParallelPreload(new MiniGameBackend().setParallelPreloadSubpackages(List.of(unknown)), unknown);
+        }
+        MiniGameBackend backend = new MiniGameBackend()
+            .setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/")))
+            .setParallelPreloadSubpackages(List.of("regal"));
+        backend.setDeferredAssetPackages(Map.of());
+        assertUnknownParallelPreload(backend, "regal");
+    }
+
+    private static void assertUnknownParallelPreload(MiniGameBackend backend, String name) {
+        try {
+            backend.renderGameJson();
+            fail("Expected unknown parallel preload subpackage to fail: " + name);
+        } catch (IllegalArgumentException expected) {
+            assertEquals("Unknown parallel preload subpackage: " + name, expected.getMessage());
+        }
+    }
+
+    @Test
+    public void parallelPreloadIsWrittenByTheRealBuild() throws IOException {
+        JsonValue config = new JsonReader().parse(read(new File(probe("runtime-robustness"), "game.json")));
+        JsonValue preload = config.get("parallelPreloadSubpackages");
+        assertEquals(3, preload.size);
+        assertEquals("engine", preload.get(0).getString("name"));
+        assertEquals("game", preload.get(1).getString("name"));
+        assertEquals("assets", preload.get(2).getString("name"));
     }
 
     @Test

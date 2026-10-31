@@ -13,3 +13,19 @@ The application must resolve required saved assets before creating synchronous r
 Tests: `:backends:backend-minigame:check` covers layout, renamed payloads, conflicts, empty/default configuration, concurrent requests, failure/retry, timeouts, fresh-runtime readiness, and release-compiled Java/JS file reads. Node mocks do not replace Android/iOS/PC WeChat checks.
 
 Consumers adding the new API must first publish this backend revision to Maven Local with `:backends:backend-minigame:publishToMavenLocal`, then rebuild their mini-game. The current shared catalog uses `1.5.4-SNAPSHOT`; record the tested backend commit alongside the consumer change. An older snapshot lacks the new build/runtime API and fails compilation.
+
+## Parallel pre-download during launch
+
+Use `MiniGameBackend.setParallelPreloadSubpackages(List<String>)` to ask WeChat to download selected code subpackages alongside the main package when the network is idle:
+
+```java
+backend.setParallelPreloadSubpackages(List.of("engine", "game", "assets"));
+```
+
+The builder emits `"parallelPreloadSubpackages": [{"name":"engine"},{"name":"game"},{"name":"assets"}]` in `game.json`, preserving the supplied names and order. Every name must be `engine`, `game`, `assets`, or a package configured with `setDeferredAssetPackages`; an unknown name fails the build and is named in the error. The two setters can be called in either order. Leaving the option unset or passing an empty list omits the field and preserves the previous output byte for byte. Include optional packages only when their early download is useful: opting in downloads their payloads early but does not mark them ready in `MiniGameAssetPackages`.
+
+WeChat's [Mini Game parallel-download guide](https://developers.weixin.qq.com/minigame/dev/guide/performance/perf-action-start-parallel-download.html) says this applies **only to formal releases**, not previews or development builds. The game still calls `wx.loadSubpackage`; WeChat reuses an in-progress download or loads the cached result. This covers packaged resources, not separate CDN downloads. The [configuration reference](https://developers.weixin.qq.com/minigame/dev/reference/configuration/app.html#subpackages) requires base library **2.1.0+** and WeChat **6.6.7+** for code subpackages; neither it nor the parallel-download guide specifies a separate minimum base-library version for `parallelPreloadSubpackages`.
+
+For a consumer's instrumented formal-release test, log the result's `loadInfo` in its existing `wx.loadSubpackage` success callback, alongside the package name, for example `console.log('[launch] subpackage', name, res.loadInfo)`. The [current Mini Game pre-download documentation](https://developers.weixin.qq.com/minigame/dev/guide/performance/predownload-of-minigame-packages.html) describes `loaded`, `progress`, and `hitOptmizations` (that is the documented spelling): keys `1` and `2` indicate pre-download before and during launch, with `needDownload` and `startTime` inside each entry. Inspect these launch logs on supported clients and compare time to interaction across formal-release cohorts; absent `loadInfo` or a preview run does not establish whether this optimization worked. This backend does not add launch logging automatically.
+
+That newer Mini Game guide also documents **`preloadPackages`**, a conditional mechanism using device/client/base-library and launch-query rules, requiring iOS/Android WeChat **8.0.70+**. It does apply to Mini Games, but this builder option only implements `parallelPreloadSubpackages`; it does not emit those conditional rules. The similarly named [Mini Program `preloadRule`](https://developers.weixin.qq.com/miniprogram/dev/framework/subpackages/preload.html) is page-triggered configuration in `app.json`, not the Mini Game `game.json` field implemented here.

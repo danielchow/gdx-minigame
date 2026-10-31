@@ -1,6 +1,8 @@
 package com.github.xpenatan.gdx.teavm.backends.minigame.config.backend;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.utils.JsonValue;
+import com.badlogic.gdx.utils.JsonWriter;
 import com.github.xpenatan.gdx.teavm.backends.minigame.config.MiniGameBuildConfiguration;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.AssetFilter;
 import com.github.xpenatan.gdx.teavm.backends.shared.config.AssetsCopy;
@@ -15,6 +17,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -47,6 +50,7 @@ public class MiniGameBackend extends TeaBackend {
     public String mainClassArgs = "";
     public AssetFilter scriptFilter;
     private Map<String, java.util.List<String>> deferredAssetPackages = Map.of();
+    private List<String> parallelPreloadSubpackages = List.of();
 
     /** Optional asset-only groups. Selectors are logical files, directory prefixes ending in '/', or stem prefixes ending in '.'. */
     public MiniGameBackend setDeferredAssetPackages(Map<String, java.util.List<String>> groups) {
@@ -54,6 +58,22 @@ public class MiniGameBackend extends TeaBackend {
         Map<String, java.util.List<String>> copy = new TreeMap<>();
         groups.forEach((name, paths) -> copy.put(name, java.util.List.copyOf(paths)));
         deferredAssetPackages = copy;
+        return this;
+    }
+
+    /**
+     * Ask WeChat to download these code subpackages alongside the main package when the network
+     * is idle. Applies only to formal releases, not previews or development builds; callers must
+     * still load the packages with wx.loadSubpackage. Code subpackages require base library 2.1.0
+     * and WeChat 6.6.7 or later; the official parallel-download guide states no separate minimum.
+     * Names are copied in order and validated when game.json is generated, so optional asset
+     * packages may be configured before or after this call. An empty list omits the field.
+     *
+     * @see <a href="https://developers.weixin.qq.com/minigame/dev/guide/performance/perf-action-start-parallel-download.html">Mini Game parallel downloads</a>
+     * @see <a href="https://developers.weixin.qq.com/minigame/dev/reference/configuration/app.html#subpackages">Code subpackage version requirements</a>
+     */
+    public MiniGameBackend setParallelPreloadSubpackages(List<String> names) {
+        parallelPreloadSubpackages = List.copyOf(names);
         return this;
     }
 
@@ -196,13 +216,29 @@ public class MiniGameBackend extends TeaBackend {
      * Generate game.json — WeChat Mini Game configuration.
      */
     private void generateGameJson() {
-        String json = TemplateUtil.resolve("game.json",
+        releasePath.child("game.json").writeString(renderGameJson(), false);
+    }
+
+    /** Shared by the build and its configuration-output tests. */
+    String renderGameJson() {
+        JsonValue packages = new JsonValue(JsonValue.ValueType.array);
+        for (String name : parallelPreloadSubpackages) {
+            if (!Set.of("engine", "game", "assets").contains(name) && !deferredAssetPackages.containsKey(name)) {
+                throw new IllegalArgumentException("Unknown parallel preload subpackage: " + name);
+            }
+            JsonValue entry = new JsonValue(JsonValue.ValueType.object);
+            entry.addChild("name", new JsonValue(name));
+            packages.addChild(entry);
+        }
+        String parallelPreload = parallelPreloadSubpackages.isEmpty() ? "" :
+            TemplateUtil.resolve("parallel-preload-subpackages.json",
+                Map.of("packages", packages.toJson(JsonWriter.OutputType.json))).stripTrailing();
+        return TemplateUtil.resolve("game.json",
             Map.of("assetPackages", AssetPackages.declarations(deferredAssetPackages),
+                "parallelPreloadSubpackages", parallelPreload,
                 "orientation", orientation,
                 "desktopOrientation", desktopOrientation != null ? desktopOrientation : orientation,
                 "displayMode", displayMode != null ? "\n    \"displayMode\": \"" + displayMode + "\"," : ""));
-        FileHandle gameJson = releasePath.child("game.json");
-        gameJson.writeString(json, false);
     }
 
     /**
