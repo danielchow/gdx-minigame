@@ -47,6 +47,14 @@ public final class RuntimeRobustnessProbe {
                     }
 
                     @Override
+                    public boolean touchDragged(int x, int y, int pointer) {
+                        record("touchDragged", pointer);
+                        record("pointerX", x);
+                        record("pointerY", y);
+                        return true;
+                    }
+
+                    @Override
                     public boolean touchUp(int x, int y, int pointer, int button) {
                         record("touchUp", pointer);
                         return true;
@@ -150,6 +158,8 @@ public final class RuntimeRobustnessProbe {
                 case "pauseMusic": music[arg].pause(); return 0;
                 case "musicPlaying": return music[arg].isPlaying() ? 1 : 0;
                 case "isTouched": return Gdx.input.isTouched() ? 1 : 0;
+                case "isPointerTouched": return Gdx.input.isTouched(arg) ? 1 : 0;
+                case "isLeftPressed": return Gdx.input.isButtonPressed(Input.Buttons.LEFT) ? 1 : 0;
                 case "throwOnRender": throwOnRender = true; return 0;
                 // DesktopDisplay.setOrientation (libGT) resizes the "window" this way during win animations.
                 case "setWindowedMode": return Gdx.graphics.setWindowedMode(arg, arg * 2) ? 1 : 0;

@@ -27,13 +27,13 @@ public class MiniGameInput extends AbstractInput {
     private final MiniGameGraphics graphics;
 
     private boolean[] touched = new boolean[MAX_TOUCHES];
+    private final double[] touchIdentifiers = new double[MAX_TOUCHES];
     private int[] touchX = new int[MAX_TOUCHES];
     private int[] touchY = new int[MAX_TOUCHES];
     private int[] deltaX = new int[MAX_TOUCHES];
     private int[] deltaY = new int[MAX_TOUCHES];
 
     private IntMap<Boolean> pressedButtons = new IntMap<>();
-    private IntMap<Integer> touchMap = new IntMap<>(20);
 
     private InputProcessor processor;
     private boolean justTouched = false;
@@ -66,11 +66,23 @@ public class MiniGameInput extends AbstractInput {
     @JSBody(params = "event", script = "return event.changedTouches;")
     private static native JSArrayReader<Touch> getChangedTouches(JSObject event);
 
+    // iOS high-performance IDs exceed 32 bits (e.g. 5830137232). TeaVM doubles preserve
+    // JS numbers without long/BigInt work or the per-event allocation of string keys.
+    @JSBody(params = "touch", script = "return touch.identifier;")
+    private static native double getTouchIdentifier(Touch touch);
+
+    private int findPointer(double identifier) {
+        for (int i = 0; i < MAX_TOUCHES; i++) {
+            if (touched[i] && touchIdentifiers[i] == identifier) return i;
+        }
+        return -1;
+    }
+
     private int getAvailablePointer() {
         for (int i = 0; i < MAX_TOUCHES; i++) {
-            if (!touchMap.containsValue(i, false)) return i;
+            if (!touched[i]) return i;
         }
-        return 0;
+        return -1;
     }
 
     private void handleTouchEvent(JSObject event, int type) {
@@ -83,13 +95,15 @@ public class MiniGameInput extends AbstractInput {
 
         for (int i = 0; i < changedTouches.getLength(); i++) {
             Touch touch = changedTouches.get(i);
-            int real = touch.getIdentifier();
+            double real = getTouchIdentifier(touch);
             int x = Math.round((float) touch.getClientX() * graphics.getTouchScaleX());
             int y = Math.round((float) touch.getClientY() * graphics.getTouchScaleY());
 
             if (type == 0) { // TOUCH_DOWN
-                int touchId;
-                touchMap.put(real, touchId = getAvailablePointer());
+                if (findPointer(real) >= 0) continue;
+                int touchId = getAvailablePointer();
+                if (touchId < 0) continue; // Do not overwrite an active pointer when full.
+                touchIdentifiers[touchId] = real;
                 touched[touchId] = true;
                 touchX[touchId] = x;
                 touchY[touchId] = y;
@@ -99,7 +113,7 @@ public class MiniGameInput extends AbstractInput {
                 if (processor != null) processor.touchDown(x, y, touchId, Input.Buttons.LEFT);
             }
             else if (type == 1) { // TOUCH_MOVE
-                int touchId = touchMap.get(real, -1);
+                int touchId = findPointer(real);
                 if (touchId >= 0) {
                     deltaX[touchId] = x - touchX[touchId];
                     deltaY[touchId] = y - touchY[touchId];
@@ -109,11 +123,10 @@ public class MiniGameInput extends AbstractInput {
                 }
             }
             else { // TOUCH_UP (2) / TOUCH_CANCEL (3)
-                Integer touchIdObj = touchMap.get(real);
-                if (touchIdObj != null) {
-                    int touchId = touchIdObj;
-                    touchMap.remove(real);
+                int touchId = findPointer(real);
+                if (touchId >= 0) {
                     touched[touchId] = false;
+                    touchIdentifiers[touchId] = 0;
                     deltaX[touchId] = x - touchX[touchId];
                     deltaY[touchId] = y - touchY[touchId];
                     touchX[touchId] = x;
@@ -123,11 +136,9 @@ public class MiniGameInput extends AbstractInput {
                         if (type == 3) processor.touchCancelled(x, y, touchId, Input.Buttons.LEFT);
                         else processor.touchUp(x, y, touchId, Input.Buttons.LEFT);
                     }
-                    if (touchId == 0) {
-                        boolean anyTouched = false;
-                        for (int j = 0; j < MAX_TOUCHES; j++) if (touched[j]) { anyTouched = true; break; }
-                        if (!anyTouched) pressedButtons.remove(Input.Buttons.LEFT);
-                    }
+                    boolean anyTouched = false;
+                    for (int j = 0; j < MAX_TOUCHES; j++) if (touched[j]) { anyTouched = true; break; }
+                    if (!anyTouched) pressedButtons.remove(Input.Buttons.LEFT);
                 }
             }
             mouseLastX = x;

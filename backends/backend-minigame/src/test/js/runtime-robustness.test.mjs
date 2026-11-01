@@ -247,6 +247,80 @@ test('a cancelled touch reaches touchCancelled, not touchUp, and clears the poin
     assert.deepEqual(touches, ['touchDown:0', 'touchCancelled:0', 'touchDown:0', 'touchUp:0']);
 });
 
+for (const identifier of [0, 7, 5269232128, 5830137232, Number.MAX_SAFE_INTEGER]) {
+    test(`touch identifier ${identifier} preserves down/end/cancel identity`, () => {
+        const probe = startProbe('ios');
+        probe.runFrames();
+        probe.touch('touchstart', identifier, 278, 501);
+        assert.equal(probe.command('isTouched'), 1);
+        assert.equal(probe.command('isLeftPressed'), 1);
+        probe.touch('touchmove', identifier, 280, 505);
+        assert.deepEqual([probe.values('pointerX'), probe.values('pointerY')], [[278, 280], [501, 505]]);
+        probe.touch('touchend', identifier, 280, 505);
+        assert.equal(probe.command('isTouched'), 0, 'release must clear the pressed pointer');
+        assert.equal(probe.command('isLeftPressed'), 0);
+        probe.touch('touchstart', identifier);
+        probe.touch('touchcancel', identifier);
+        assert.equal(probe.command('isTouched'), 0, 'cancel must clear the pressed pointer');
+        assert.equal(probe.command('isLeftPressed'), 0);
+        assert.deepEqual(probe.report.events.filter(e => e.startsWith('touch')),
+            ['touchDown:0', 'touchDragged:0', 'touchUp:0', 'touchDown:0', 'touchCancelled:0']);
+    });
+}
+
+for (const first of [1, 5830137232]) {
+    for (const releaseFirst of [0, 1]) {
+        test(`touch IDs ${first} and ${first + 2 ** 32} stay distinct; release pointer ${releaseFirst} first`, () => {
+            const probe = startProbe('ios');
+            probe.runFrames();
+            const ids = [first, first + 2 ** 32];
+            probe.touch('touchstart', ids[0]);
+            probe.touch('touchstart', ids[1]);
+            probe.touch('touchmove', ids[1], 30, 40);
+            probe.touch('touchend', ids[releaseFirst]);
+            assert.equal(probe.command('isPointerTouched', releaseFirst), 0);
+            assert.equal(probe.command('isPointerTouched', 1 - releaseFirst), 1, 'other finger stays pressed');
+            probe.touch('touchend', ids[1 - releaseFirst]);
+            assert.equal(probe.command('isLeftPressed'), 0, 'last release clears the mouse button in either order');
+            assert.deepEqual(probe.report.events.filter(e => e.startsWith('touch')),
+                ['touchDown:0', 'touchDown:1', 'touchDragged:1', `touchUp:${releaseFirst}`, `touchUp:${1 - releaseFirst}`]);
+        });
+    }
+}
+
+test('duplicate starts and unknown releases cannot steal an active pointer', () => {
+    const probe = startProbe('ios');
+    probe.runFrames();
+    probe.touch('touchstart', 5830137232);
+    probe.touch('touchstart', 5830137232);
+    probe.touch('touchend', 5830137233);
+    assert.equal(probe.command('isPointerTouched', 0), 1);
+    assert.equal(probe.command('isPointerTouched', 1), 0);
+    probe.touch('touchcancel', 5830137232);
+    probe.touch('touchstart', 0);
+    probe.touch('touchend', 0);
+    assert.equal(probe.command('isLeftPressed'), 0);
+    assert.deepEqual(probe.report.events.filter(e => e.startsWith('touch')),
+        ['touchDown:0', 'touchCancelled:0', 'touchDown:0', 'touchUp:0']);
+});
+
+test('the fixed pointer table ignores overflow and reuses a cancelled slot', () => {
+    const probe = startProbe('ios');
+    probe.runFrames();
+    const base = 5830137232;
+    for (let i = 0; i < 20; i++) probe.touch('touchstart', base + i);
+    probe.touch('touchstart', base + 20);
+    probe.touch('touchend', base + 20);
+    assert.equal(probe.values('touchDown').length, 20, 'overflow must not overwrite pointer zero');
+    for (let i = 0; i < 20; i++) assert.equal(probe.command('isPointerTouched', i), 1);
+    probe.touch('touchcancel', base + 7);
+    probe.touch('touchstart', base + 20);
+    assert.equal(probe.values('touchDown').at(-1), 7);
+    for (let i = 0; i < 20; i++) probe.touch('touchend', i === 7 ? base + 20 : base + i);
+    for (let i = 0; i < 20; i++) assert.equal(probe.command('isPointerTouched', i), 0);
+    assert.equal(probe.command('isLeftPressed'), 0);
+});
+
 test('a throwing render reports once, stops the loop and offers a restart', () => {
     const probe = startProbe();
     for (let i = 0; i < 3; i++) assert.equal(probe.runFrames(), 1);
