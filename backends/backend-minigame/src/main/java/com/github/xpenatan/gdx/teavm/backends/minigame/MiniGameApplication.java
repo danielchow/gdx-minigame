@@ -73,6 +73,8 @@ public class MiniGameApplication implements Application {
 
     private boolean stepError;
     private boolean hidden;
+    private boolean startupReady;
+    MiniGameNativeTextures nativeTextures;
     private boolean renderRequested = true;
     private boolean frameRunning;
     private int pendingFrame = -1;
@@ -147,7 +149,14 @@ public class MiniGameApplication implements Application {
         WX.onAudioInterruptionBegin((OnHideCallback) () -> audio.onInterruptionBegin());
         WX.onAudioInterruptionEnd((OnHideCallback) () -> audio.onInterruptionEnd());
 
-        requestRendering();
+        nativeTextures = new MiniGameNativeTextures(files);
+        nativeTextures.prepare(config.nativeTextureFiles, config.nativeTextureTimeoutMillis, () -> {
+            // The image wait is startup time, not an animation step. No app frame (including
+            // input/show/resize wakeups) may reach create or synchronous asset loading before this.
+            if (config.nativeTextureFiles.length != 0) graphics.lastTimeStamp = System.currentTimeMillis();
+            startupReady = true;
+            requestRendering();
+        });
     }
 
     /** Coalesces requests from input, postRunnable and JS timers into the next RAF. */
@@ -157,7 +166,7 @@ public class MiniGameApplication implements Application {
     }
 
     private void scheduleFrame() {
-        if (hidden || stepError || frameRunning || pendingFrame != -1) return;
+        if (!startupReady || hidden || stepError || frameRunning || pendingFrame != -1) return;
         if (!renderRequested && !graphics.isContinuousRendering()) return;
         final int generation = ++frameGeneration;
         pendingFrame = WX.requestAnimationFrame(timestamp -> {

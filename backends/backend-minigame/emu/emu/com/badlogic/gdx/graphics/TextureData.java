@@ -39,6 +39,9 @@ public interface TextureData {
 
         public static com.badlogic.gdx.graphics.TextureData loadFromFile(FileHandle file, com.badlogic.gdx.graphics.Pixmap.Format format, boolean useMipMaps) {
             if(file == null) return null;
+            com.badlogic.gdx.graphics.TextureData nativeData =
+                com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameNativeTextures.takePrepared(file, format, useMipMaps);
+            if(nativeData != null) return nativeData;
             FileTextureData fileTextureDataEmu = new FileTextureData(file, new com.badlogic.gdx.graphics.Pixmap(file), format, useMipMaps);
             return fileTextureDataEmu;
         }

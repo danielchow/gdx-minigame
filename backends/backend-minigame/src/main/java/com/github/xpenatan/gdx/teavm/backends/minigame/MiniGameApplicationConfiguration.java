@@ -10,6 +10,18 @@ package com.github.xpenatan.gdx.teavm.backends.minigame;
  */
 public class MiniGameApplicationConfiguration {
 
+    /**
+     * Internal PNGs used only as textures, decoded natively before create(). Empty by default.
+     * Opted-in textures may have Custom TextureData: consumePixmap() is deliberately unsupported;
+     * use direct Pixmap/FileTextureData for pixel readers. Unsupported formats/mipmaps keep stb_image.
+     * Native images are released after first upload (or after five seconds if unused); managed
+     * reloads use stb_image synchronously. Configure only startup files the app is about to load.
+     */
+    public String[] nativeTextureFiles = new String[0];
+
+    /** Positive per-image timeout; files decode concurrently and failures fall back to stb_image. */
+    public int nativeTextureTimeoutMillis = 5000;
+
     /** Whether to enable OpenGL ES 30 (WebGL2) if supported. */
     public boolean useGL30 = false;
 

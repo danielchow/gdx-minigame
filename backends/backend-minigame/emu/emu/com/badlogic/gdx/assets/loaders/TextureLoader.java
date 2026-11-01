@@ -37,8 +37,11 @@ public class TextureLoader extends AsynchronousAssetLoader<Texture, TextureLoade
             }
 
             FileHandle handle = resolve(fileName);
-            pixmap = new Pixmap(handle);
-            data = new FileTextureData(handle, pixmap, format, genMipMaps);
+            data = com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameNativeTextures.takePrepared(handle, format, genMipMaps);
+            if(data == null) {
+                pixmap = new Pixmap(handle);
+                data = new FileTextureData(handle, pixmap, format, genMipMaps);
+            }
         }
         else {
             data = parameter.textureData;

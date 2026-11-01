@@ -21,6 +21,7 @@ public final class RegressionProbeBuilder {
     public static void main(String[] args) {
         File outputRoot = new File(args[0]);
         build(PixmapBufferProbe.class, new File(outputRoot, "pixmap-buffer"));
+        build(NativeTextureProbe.class, new File(outputRoot, "native-texture"));
         build(AsyncCompletionProbe.class, new File(outputRoot, "async-completion"));
         build(GLUploadRangeProbe.class, new File(outputRoot, "gl-upload-range"));
         // A portrait phone game in a landscape PC window, for BuildOutputTest.

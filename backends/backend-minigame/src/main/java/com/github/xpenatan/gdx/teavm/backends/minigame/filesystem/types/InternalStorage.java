@@ -77,6 +77,13 @@ public class InternalStorage extends FileDB {
         return root + normalized;
     }
 
+    /** Native image readers obey the same manifest, package and rename boundary as readBytes. */
+    public String nativeImagePath(MiniGameFileHandle file) {
+        String path = normalize(file.path());
+        if (!filePaths.contains(path) || MiniGameAssetPackages.isMissing(path)) return null;
+        return toWXPath(path);
+    }
+
     // ── Manifest loading ────────────────────────────────────────────
 
     private void loadManifest() {

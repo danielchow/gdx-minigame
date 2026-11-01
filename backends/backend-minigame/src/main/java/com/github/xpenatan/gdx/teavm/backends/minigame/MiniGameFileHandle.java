@@ -36,6 +36,15 @@ public class MiniGameFileHandle extends FileHandle {
         this.files = files;
     }
 
+    /** Only our own internal handles may bypass byte reads for native texture decoding. */
+    String nativeImagePath(MiniGameFiles owner) {
+        if (files != owner || type != FileType.Internal || getClass() != MiniGameFileHandle.class
+            || !(files.internalStorage instanceof com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.InternalStorage))
+            return null;
+        return ((com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.InternalStorage)
+            files.internalStorage).nativeImagePath(this);
+    }
+
     @Override
     public String path() {
         return file;
