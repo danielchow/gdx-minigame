@@ -11,5 +11,5 @@
         { "name": "engine", "root": "subpackages/engine/" },
         { "name": "game", "root": "subpackages/game/" },
         { "name": "assets", "root": "assets/" }${assetPackages}
-    ]${parallelPreloadSubpackages}
+    ]${parallelPreloadSubpackages}${iosHighPerformance}
 }

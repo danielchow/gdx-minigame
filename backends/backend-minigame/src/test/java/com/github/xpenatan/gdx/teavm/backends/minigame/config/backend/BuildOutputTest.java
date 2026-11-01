@@ -74,6 +74,28 @@ public class BuildOutputTest {
     }
 
     @Test
+    public void iosHighPerformanceIsOptInAndCanBeDisabledWithoutChangingOtherConfig() {
+        MiniGameBackend backend = new MiniGameBackend()
+            .setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/")))
+            .setParallelPreloadSubpackages(List.of("engine", "game", "assets"));
+        String normal = backend.renderGameJson();
+        assertFalse(new JsonReader().parse(normal).has("iOSHighPerformance"));
+        assertEquals(normal, backend.setIOSHighPerformance(false).renderGameJson());
+        String highPerformance = backend.setIOSHighPerformance(true).renderGameJson();
+        assertTrue(new JsonReader().parse(highPerformance).getBoolean("iOSHighPerformance"));
+        assertEquals(normal, highPerformance.replace(
+            TemplateUtil.resolve("ios-high-performance.json").stripTrailing(), ""));
+        assertEquals(normal, backend.setIOSHighPerformance(false).renderGameJson());
+    }
+
+    @Test
+    public void iosHighPerformanceIsWrittenByTheRealBuildOnlyWhenEnabled() throws IOException {
+        assertFalse(new JsonReader().parse(read(new File(probe("share"), "game.json"))).has("iOSHighPerformance"));
+        assertTrue(new JsonReader().parse(read(new File(probe("runtime-robustness"), "game.json")))
+            .getBoolean("iOSHighPerformance"));
+    }
+
+    @Test
     public void parallelPreloadPreservesNamesAndOrderIncludingOptionalPackages() {
         List<String> names = new ArrayList<>(List.of("regal", "game", "engine", "assets", "regal"));
         MiniGameBackend backend = new MiniGameBackend().setParallelPreloadSubpackages(names)

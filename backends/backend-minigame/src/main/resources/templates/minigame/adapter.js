@@ -73,21 +73,46 @@ if (typeof performance === 'undefined') {
     globalThis.performance = { now: Date.now };
 }
 
-// === WebAssembly patch ===
-if (typeof WXWebAssembly !== 'undefined') {
-    if (typeof WebAssembly === 'undefined') {
-        globalThis.WebAssembly = {};
+// === Extracted Gdx WebAssembly ===
+(function() {
+    var standardWasm = typeof WebAssembly !== 'undefined' ? WebAssembly : null;
+    var wxWasm = typeof WXWebAssembly !== 'undefined' ? WXWebAssembly : null;
+    // Capture before patching; avoid recursion if the host aliases the two APIs.
+    var instantiate = standardWasm && typeof standardWasm.instantiate === 'function'
+        ? standardWasm.instantiate.bind(standardWasm) : null;
+    var instantiatePath = wxWasm && wxWasm !== standardWasm && typeof wxWasm.instantiate === 'function'
+        ? wxWasm.instantiate.bind(wxWasm) : null;
+    if (!instantiatePath && instantiate) {
+        // FreeType also calls the package-path API. Provide it in standard-only runtimes
+        // without modifying the shared extension or attempting HTTP fetches of package files.
+        instantiatePath = function(path, imports) {
+            return new Promise(function(resolve, reject) {
+                wx.getFileSystemManager().readFile({
+                    filePath: path,
+                    success: function(result) { resolve(result.data); },
+                    fail: function(error) {
+                        reject(new Error('Cannot read ' + path + ': ' + (error.errMsg || error)));
+                    }
+                });
+            }).then(function(binary) { return instantiate(binary, imports); });
+        };
+        globalThis.WXWebAssembly = Object.create(standardWasm);
+        globalThis.WXWebAssembly.instantiate = instantiatePath;
     }
-    var originalInstantiate = WebAssembly.instantiate;
-    // gdx.wasm.js passes its embedded bytes, which the build replaced with a dummy;
-    // WXWebAssembly loads the extracted gdx.wasm from the package instead.
+    if (!standardWasm) globalThis.WebAssembly = {};
     WebAssembly.instantiate = function(source, imports) {
-        if (source instanceof ArrayBuffer || source instanceof Uint8Array) {
-            return WXWebAssembly.instantiate('subpackages/engine/gdx.wasm', imports);
+        var bytes = source instanceof ArrayBuffer ? new Uint8Array(source)
+            : ArrayBuffer.isView(source) ? new Uint8Array(source.buffer, source.byteOffset, source.byteLength) : null;
+        // The builder replaces ONLY Gdx's embedded binary with one zero byte. Leave other
+        // modules/binaries alone; intercepting every byte buffer would load Gdx for them too.
+        if (!bytes || bytes.length !== 1 || bytes[0] !== 0) {
+            return instantiate ? instantiate(source, imports) : Promise.reject(new Error('No standard WASM support'));
         }
-        return originalInstantiate ? originalInstantiate(source, imports) : Promise.reject(new Error('No WASM support'));
+        var path = 'subpackages/engine/gdx.wasm';
+        return instantiatePath ? instantiatePath(path, imports)
+            : Promise.reject(new Error('No WASM support for ' + path));
     };
-}
+})();
 
 // === atob polyfill ===
 if (typeof atob === 'undefined') {

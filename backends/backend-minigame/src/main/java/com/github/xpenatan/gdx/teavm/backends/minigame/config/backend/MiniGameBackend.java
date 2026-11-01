@@ -51,6 +51,7 @@ public class MiniGameBackend extends TeaBackend {
     public AssetFilter scriptFilter;
     private Map<String, java.util.List<String>> deferredAssetPackages = Map.of();
     private List<String> parallelPreloadSubpackages = List.of();
+    private boolean iosHighPerformance;
 
     /** Optional asset-only groups. Selectors are logical files, directory prefixes ending in '/', or stem prefixes ending in '.'. */
     public MiniGameBackend setDeferredAssetPackages(Map<String, java.util.List<String>> groups) {
@@ -74,6 +75,18 @@ public class MiniGameBackend extends TeaBackend {
      */
     public MiniGameBackend setParallelPreloadSubpackages(List<String> names) {
         parallelPreloadSubpackages = List.copyOf(names);
+        return this;
+    }
+
+    /**
+     * Opt in to WeChat's iOS high-performance runtime. Off by default; false omits the key.
+     * The mini game's console capability must also be enabled. Older iOS/WeChat versions
+     * still use normal mode, so applications must test and support both runtimes.
+     *
+     * @see <a href="https://developers.weixin.qq.com/minigame/dev/guide/performance/perf-high-performance.html">iOS high-performance mode</a>
+     */
+    public MiniGameBackend setIOSHighPerformance(boolean enabled) {
+        iosHighPerformance = enabled;
         return this;
     }
 
@@ -236,6 +249,7 @@ public class MiniGameBackend extends TeaBackend {
         return TemplateUtil.resolve("game.json",
             Map.of("assetPackages", AssetPackages.declarations(deferredAssetPackages),
                 "parallelPreloadSubpackages", parallelPreload,
+                "iosHighPerformance", iosHighPerformance ? TemplateUtil.resolve("ios-high-performance.json").stripTrailing() : "",
                 "orientation", orientation,
                 "desktopOrientation", desktopOrientation != null ? desktopOrientation : orientation,
                 "displayMode", displayMode != null ? "\n    \"displayMode\": \"" + displayMode + "\"," : ""));
