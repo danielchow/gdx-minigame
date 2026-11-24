@@ -155,12 +155,23 @@ public class MiniGameApplication implements Application {
     }
 
     private void completeAssetInit() {
-        files = new MiniGameFiles(config, this);
-        Gdx.files = files;
-        if (config.deferFirstFrameToRaf) {
-            requestRendering();
-        } else {
-            scheduleInitialMicrotask();
+        try {
+            files = new MiniGameFiles(config, this);
+            Gdx.files = files;
+            if (config.deferFirstFrameToRaf) {
+                requestRendering();
+            } else {
+                scheduleInitialMicrotask();
+            }
+        } catch (Throwable t) {
+            stepError = true;
+            try {
+                onError(t);
+            } catch (Throwable ignored) {
+                // Keep fatal recovery reachable even if error formatting fails on a host JS error.
+            } finally {
+                onFatalError(t);
+            }
         }
     }
 
@@ -334,7 +345,9 @@ public class MiniGameApplication implements Application {
             errors.add(0, jsException);
             String msg = root.getMessage();
             if (msg == null) msg = "";
-            throwables.add(0, root.getClass().getSimpleName() + " " + msg);
+            String simpleName = root.getClass().getSimpleName();
+            if (simpleName == null) simpleName = "Error";
+            throwables.add(0, simpleName + " " + msg);
             root = root.getCause();
         }
         JSObject[] errorsJS = new JSObject[errors.size()];

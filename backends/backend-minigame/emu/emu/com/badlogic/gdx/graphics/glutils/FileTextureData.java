@@ -7,6 +7,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.github.xpenatan.gdx.teavm.backends.minigame.WebGL20;
+import emu.com.badlogic.gdx.graphics.g2d.Gdx2DPixmapNative;
 import emu.com.badlogic.gdx.graphics.g2d.PixmapNativeInterface;
 
 public class FileTextureData implements com.badlogic.gdx.graphics.TextureData {
@@ -110,12 +111,16 @@ public class FileTextureData implements com.badlogic.gdx.graphics.TextureData {
     }
 
     private boolean canUploadDirectly() {
-        return isPrepared
-            && !useMipMaps
-            && pixmap != null
-            && (format == null || format == pixmap.getFormat())
-            && Gdx.gl20 instanceof WebGL20
-            && pixmap.getGLType() == GL20.GL_UNSIGNED_BYTE;
+        if (!isPrepared
+            || useMipMaps
+            || pixmap == null
+            || (format != null && format != pixmap.getFormat())
+            || !(Gdx.gl20 instanceof WebGL20)
+            || pixmap.getGLType() != GL20.GL_UNSIGNED_BYTE) {
+            return false;
+        }
+        Gdx2DPixmapNative nativePixmap = ((PixmapNativeInterface) (Object) pixmap).getNative();
+        return nativePixmap != null && nativePixmap.canUploadHeapDirectly();
     }
 
     @Override

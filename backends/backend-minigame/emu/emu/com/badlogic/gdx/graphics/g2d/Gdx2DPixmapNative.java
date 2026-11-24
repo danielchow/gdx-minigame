@@ -249,9 +249,14 @@ public class Gdx2DPixmapNative implements Disposable {
             "var view = new Uint8Array(arrayBuffer);" +
             "var len = view.byteLength;" +
             "var cBuffer = Gdx._malloc(len);" +
-            "Gdx.HEAPU8.set(view, cBuffer);" +
-            "var pixmap = Gdx.Gdx.prototype.g2d_load(cBuffer, 0, len);" +
-            "Gdx._free(cBuffer);" +
+            "if(!cBuffer) return null;" +
+            "var pixmap;" +
+            "try {" +
+            "   Gdx.HEAPU8.set(view, cBuffer);" +
+            "   pixmap = Gdx.Gdx.prototype.g2d_load(cBuffer, 0, len);" +
+            "} finally {" +
+            "   Gdx._free(cBuffer);" +
+            "}" +
             "if(pixmap === null || Gdx.getPointer(pixmap) === 0) {" +
             "   return null;" +
             "}" +

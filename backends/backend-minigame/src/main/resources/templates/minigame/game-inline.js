@@ -152,26 +152,32 @@ async function startGame() {
         // Phase 1: Start assets subpackage download/mount first so I/O overlaps WASM and app init.
         var assetsPromise = loadSubpackage('assets');
 
-        // Prefetch secure entropy in parallel with assets/WASM so MiniGameCrypto starts immediately.
-        try {
-            var rngMgr = typeof wx.getRandomValues === 'function' ? wx :
-                (typeof wx.getUserCryptoManager === 'function' ? wx.getUserCryptoManager() : null);
-            if (rngMgr && typeof rngMgr.getRandomValues === 'function') {
-                globalThis.__preloadedRandomValues = null;
-                globalThis.__preloadedRandomValuesPromise = new Promise(function(resolve) {
-                    rngMgr.getRandomValues({
-                        length: 65536,
-                        success: function(res) {
-                            if (res && res.randomValues && res.randomValues.byteLength === 65536) {
-                                globalThis.__preloadedRandomValues = res.randomValues;
-                            }
-                            resolve(globalThis.__preloadedRandomValues);
-                        },
-                        fail: function() { resolve(null); }
+        // Prefetch secure entropy in parallel with assets/WASM when Web Crypto is absent.
+        if (!(globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function')) {
+            try {
+                var rngMgr = typeof wx.getRandomValues === 'function' ? wx :
+                    (typeof wx.getUserCryptoManager === 'function' ? wx.getUserCryptoManager() : null);
+                if (rngMgr && typeof rngMgr.getRandomValues === 'function') {
+                    globalThis.__preloadedRandomValues = null;
+                    globalThis.__preloadedRandomValuesPromise = new Promise(function(resolve) {
+                        try {
+                            rngMgr.getRandomValues({
+                                length: 65536,
+                                success: function(res) {
+                                    if (res && res.randomValues && res.randomValues.byteLength === 65536) {
+                                        globalThis.__preloadedRandomValues = res.randomValues;
+                                    }
+                                    resolve(globalThis.__preloadedRandomValues);
+                                },
+                                fail: function() { resolve(null); }
+                            });
+                        } catch (e) {
+                            resolve(null);
+                        }
                     });
-                });
-            }
-        } catch (e) {}
+                }
+            } catch (e) {}
+        }
 
         // Phase 2: Start both WASM modules in parallel from the main package.
         try {
@@ -207,8 +213,11 @@ async function startGame() {
                 try { globalThis.__preloadedTextFiles['assets/preload.txt'] = fsm.readFileSync('assets/preload.txt', 'utf-8'); } catch(e) {}
                 try {
                     var renameRaw = fsm.readFileSync('assets/rename-map.json', 'utf-8');
-                    globalThis.__preloadedTextFiles['assets/rename-map.json'] = renameRaw;
-                    globalThis.__preloadedRenameMap = JSON.parse(renameRaw);
+                    try {
+                        globalThis.__preloadedRenameMap = JSON.parse(renameRaw);
+                    } catch (parseErr) {
+                        globalThis.__preloadedTextFiles['assets/rename-map.json'] = renameRaw;
+                    }
                 } catch(e) {}
             } catch(e) {}
         });

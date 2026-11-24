@@ -80,6 +80,12 @@ function stopWatchdog() {
     }
 }
 
+function reportProgress(name, percent) {
+    if (firstScreen && typeof firstScreen.setProgress === 'function') {
+        firstScreen.setProgress(name, percent);
+    }
+}
+
 // gdx.wasm.js assigns window.Gdx from an un-awaited promise, so a failed WASM instantiation
 // surfaces only as an unhandled rejection (not dispatched on Android; the watchdog covers that).
 function onStartupRejection(res) {
@@ -94,6 +100,7 @@ function loadSubpackage(name) {
             var task = wx.loadSubpackage({
                 name: name,
                 success: function() {
+                    reportProgress(name, 100);
                     kickWatchdog();
                     resolve();
                 },
@@ -102,7 +109,12 @@ function loadSubpackage(name) {
                     showStartupFailure('加载失败，请检查网络后重试', attempt);
                 }
             });
-            if (task && typeof task.onProgressUpdate === 'function') task.onProgressUpdate(kickWatchdog);
+            if (task && typeof task.onProgressUpdate === 'function') {
+                task.onProgressUpdate(function(update) {
+                    kickWatchdog();
+                    reportProgress(name, update && update.progress);
+                });
+            }
         }
         attempt();
     });
@@ -191,8 +203,9 @@ async function startGame() {
         stopWatchdog();
         if (typeof wx.offUnhandledRejection === 'function') wx.offUnhandledRejection(onStartupRejection);
 
-        // Redraw splash to bridge canvas resize gap
+        // Redraw splash to bridge canvas resize gap, then release splash GL resources
         firstScreen.redraw();
+        if (firstScreen && typeof firstScreen.end === 'function') firstScreen.end();
     } catch (err) {
         failStartup('exception', err);
     }

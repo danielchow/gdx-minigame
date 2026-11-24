@@ -6,7 +6,6 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import org.teavm.jso.typedarrays.ArrayBuffer;
-import org.teavm.jso.webgl.WebGLRenderingContext;
 
 public class Gdx2DPixmap implements Disposable, PixmapNativeInterface {
     public static final int GDX2D_FORMAT_ALPHA = 1;
@@ -63,10 +62,6 @@ public class Gdx2DPixmap implements Disposable, PixmapNativeInterface {
 
     public Gdx2DPixmap(byte[] encodedData, int offset, int len, int requestedFormat) {
         nativePixmap = new Gdx2DPixmapNative(encodedData, offset, len, requestedFormat);
-    }
-
-    public void uploadToGL(WebGLRenderingContext gl, int target) {
-        nativePixmap.uploadToGL(gl, target, getGLInternalFormat(), getGLFormat(), getGLType());
     }
 
     /**

@@ -44,7 +44,7 @@ function noopProxy(values = {}) {
  * `canvas` is the size wx.createCanvas() returned in game.js; `window` overrides wx.getWindowInfo()
  * at startup.
  */
-function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canvasSize, window = {}, globals = {}} = {}) {
+function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canvasSize, window = {}, globals = {}, wxOverrides = {}} = {}) {
     const frames = [];
     const listeners = {};
     const contexts = [];
@@ -93,6 +93,7 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
         exitMiniProgram: options => exits.push(options),
         vibrateShort: options => vibrations.push(['short', options?.type]),
         vibrateLong: () => vibrations.push(['long']),
+        ...wxOverrides,
     });
     const canvas = {width: 100, height: 200, ...canvasSize, getContext: () => gl};
     const context = vm.createContext({exports: {}, console, performance, wx, canvas, XMLHttpRequest, __robustnessProbe: report,
@@ -576,4 +577,20 @@ test('assets-ready gate defers first frame until resolved and ignores premature 
     assert.equal(p.pendingFrames(), 1, 'frame schedules once assets gate resolves');
     p.runFrames();
     assert.equal(eventCount(p, 'create'), 1);
+});
+
+test('failure inside completeAssetInit shows the fatal restart modal instead of hanging', async () => {
+    let releaseAssets;
+    const gate = new Promise(resolve => { releaseAssets = resolve; });
+    const p = startProbe('devtools', noopProxy(), {
+        globals: {__miniGameAssetsReady: gate},
+        wxOverrides: {getFileSystemManager() { throw new Error('fs broken'); }},
+    });
+    assert.equal(p.modals.length, 0);
+    releaseAssets();
+    await gate;
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(p.modals.length, 1, 'completeAssetInit failure must trigger fatal modal');
+    assert.equal(p.pendingFrames(), 0);
 });

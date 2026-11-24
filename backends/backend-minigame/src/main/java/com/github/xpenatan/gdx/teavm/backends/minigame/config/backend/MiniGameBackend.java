@@ -196,7 +196,7 @@ public class MiniGameBackend extends TeaBackend {
     }
 
     /** Fails the build if main-package files exceed WeChat's 4 MiB limit. */
-    static long verifyMainPackageSize(File releaseDir) {
+    public static long verifyMainPackageSize(File releaseDir) {
         long bytes = mainPackageBytes(releaseDir);
         if (bytes > MAX_MAIN_PACKAGE_BYTES) {
             throw new IllegalStateException("Main package exceeds WeChat's 4 MiB limit: "

@@ -124,3 +124,55 @@ test('inline entry fails startup on freetype rejection or main error', async () 
     await settleAll();
     assert.equal(mainErr.modals.length, 1);
 });
+
+test('inline entry isolates synchronous getRandomValues throw and skips prefetch when Web Crypto exists', async () => {
+    const events = [];
+    const modals = [];
+    const mainCalls = [];
+    let rejectionHandler;
+    const screen = {start() {}, setProgress() {}, redraw() {}, end() {}};
+    const context = vm.createContext({console: quiet, Date, Promise, Error,
+        setTimeout() { return 1; }, clearTimeout() {}});
+    vm.runInContext('var window = globalThis;', context);
+    context.require = name => {
+        if (name === './asset-packages') return {create};
+        if (name === './adapter.js') return {setup() {}};
+        if (name === './first-screen') return screen;
+        if (name === './engine/freetype-loader.js') return {};
+        if (name === './engine/gdx.wasm.js') { setImmediate(() => { context.window.Gdx = {}; }); return {}; }
+        if (name === './app.js') return {main(args, cb) { mainCalls.push(args); cb(); }};
+        throw new Error('Unexpected require: ' + name);
+    };
+    context.wx = {
+        createCanvas: () => ({width: 1, height: 1}),
+        getFileSystemManager: () => ({readFileSync(path) {
+            if (path === 'assets/asset-packages.json') return '{}';
+            if (path === 'assets/rename-map.json') return '{"/a.p":"/a.p.txt"}';
+            throw new Error('missing');
+        }}),
+        getRandomValues() { throw new Error('sync rng failure'); },
+        onUnhandledRejection(fn) { rejectionHandler = fn; },
+        offUnhandledRejection() {},
+        showModal: options => modals.push(options),
+        loadSubpackage(options) { setImmediate(() => options.success()); return {}; },
+    };
+    vm.runInContext(template, context, {filename: 'game-inline.js'});
+    await settleAll();
+    assert.equal(mainCalls.length, 1);
+    assert.equal(modals.length, 0);
+    assert.equal(await context.__preloadedRandomValuesPromise, null);
+    assert.deepEqual({...context.__preloadedRenameMap}, {'/a.p': '/a.p.txt'});
+    assert.equal(context.__preloadedTextFiles['assets/rename-map.json'], undefined);
+
+    // When Web Crypto already exists, do not invoke wx.getRandomValues prefetch.
+    let rngCalls = 0;
+    const ctx2 = vm.createContext({console: quiet, Date, Promise, Error,
+        crypto: {getRandomValues: arr => arr}, setTimeout() { return 1; }, clearTimeout() {}});
+    vm.runInContext('var window = globalThis;', ctx2);
+    ctx2.require = context.require;
+    ctx2.wx = {...context.wx, getRandomValues() { rngCalls++; }};
+    vm.runInContext(template, ctx2, {filename: 'game-inline.js'});
+    await settleAll();
+    assert.equal(rngCalls, 0);
+    assert.equal(ctx2.__preloadedRandomValuesPromise, undefined);
+});
