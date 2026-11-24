@@ -52,6 +52,14 @@ public class MiniGameApplicationConfiguration {
     /** Whether to encode preference keys/values. */
     public boolean shouldEncodePreference = false;
 
+    /**
+     * When true (default), the first {@code create()}/{@code render()} step waits for the next
+     * {@code requestAnimationFrame}. Set false to start that first step on a microtask right after
+     * {@code main()} returns (still after splash handoff and immediate {@code postRunnable} calls),
+     * avoiding a VSync stall during cold boot.
+     */
+    public boolean deferFirstFrameToRaf = true;
+
     public boolean isFixedSizeApplication() {
         return false; // Always fullscreen on WeChat
     }

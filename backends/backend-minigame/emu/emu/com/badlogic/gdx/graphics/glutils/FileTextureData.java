@@ -2,9 +2,12 @@ package emu.com.badlogic.gdx.graphics.glutils;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.github.xpenatan.gdx.teavm.backends.minigame.WebGL20;
+import emu.com.badlogic.gdx.graphics.g2d.PixmapNativeInterface;
 
 public class FileTextureData implements com.badlogic.gdx.graphics.TextureData {
     static public boolean copyToPOT;
@@ -106,13 +109,32 @@ public class FileTextureData implements com.badlogic.gdx.graphics.TextureData {
         return file;
     }
 
+    private boolean canUploadDirectly() {
+        return isPrepared
+            && !useMipMaps
+            && pixmap != null
+            && (format == null || format == pixmap.getFormat())
+            && Gdx.gl20 instanceof WebGL20
+            && pixmap.getGLType() == GL20.GL_UNSIGNED_BYTE;
+    }
+
     @Override
     public TextureDataType getType() {
-        return TextureDataType.Pixmap;
+        return canUploadDirectly() ? TextureDataType.Custom : TextureDataType.Pixmap;
     }
 
     @Override
     public void consumeCustomData(int target) {
-        throw new GdxRuntimeException("This TextureData implementation does not upload data itself");
+        if (!canUploadDirectly()) {
+            throw new GdxRuntimeException("This TextureData implementation does not upload data itself");
+        }
+        Pixmap p = consumePixmap();
+        try {
+            Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
+            ((PixmapNativeInterface) (Object) p).getNative().uploadToGL(
+                ((WebGL20) Gdx.gl20).gl, target, p.getGLInternalFormat(), p.getGLFormat(), p.getGLType());
+        } finally {
+            p.dispose();
+        }
     }
 }

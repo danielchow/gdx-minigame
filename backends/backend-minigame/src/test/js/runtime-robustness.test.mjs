@@ -44,7 +44,7 @@ function noopProxy(values = {}) {
  * `canvas` is the size wx.createCanvas() returned in game.js; `window` overrides wx.getWindowInfo()
  * at startup.
  */
-function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canvasSize, window = {}} = {}) {
+function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canvasSize, window = {}, globals = {}} = {}) {
     const frames = [];
     const listeners = {};
     const contexts = [];
@@ -97,7 +97,7 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
     const canvas = {width: 100, height: 200, ...canvasSize, getContext: () => gl};
     const context = vm.createContext({exports: {}, console, performance, wx, canvas, XMLHttpRequest, __robustnessProbe: report,
         requestAnimationFrame(callback) {frames.push(callback); return frames.length;},
-        cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays});
+        cancelAnimationFrame() {}, setTimeout, clearTimeout, ...typedArrays, ...globals});
     vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
     let mainError;
     context.exports.main([], error => {mainError = error;});
@@ -560,4 +560,20 @@ test('music completion and error wake a dormant loop', () => {
     assert.equal(p.pendingFrames(), 1);
     p.runFrames();
     assert.equal(p.pendingFrames(), 0);
+});
+
+test('assets-ready gate defers first frame until resolved and ignores premature hide/show', async () => {
+    let releaseAssets;
+    const gate = new Promise(resolve => { releaseAssets = resolve; });
+    const p = startProbe('devtools', noopProxy(), {globals: {__miniGameAssetsReady: gate}});
+    assert.equal(p.pendingFrames(), 0, 'must not schedule a frame before assets mount');
+    p.fire('hide');
+    p.fire('show', {});
+    assert.equal(p.pendingFrames(), 0, 'show before assets mount must not start the loop');
+    releaseAssets();
+    await gate;
+    await Promise.resolve();
+    assert.equal(p.pendingFrames(), 1, 'frame schedules once assets gate resolves');
+    p.runFrames();
+    assert.equal(eventCount(p, 'create'), 1);
 });

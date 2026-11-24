@@ -241,6 +241,57 @@ public class BuildOutputTest {
         assertTrue(userFile.exists());
     }
 
+    @Test
+    public void bundleCodeInMainPackageRemovesCodeSubpackagesAndValidatesParallelPreload() {
+        MiniGameBackend backend = new MiniGameBackend()
+            .setBundleCodeInMainPackage(true)
+            .setDeferredAssetPackages(Map.of("regal", List.of("theme/regal/")))
+            .setParallelPreloadSubpackages(List.of("assets"));
+        JsonValue config = new JsonReader().parse(backend.renderGameJson());
+        JsonValue packages = config.get("subpackages");
+        assertEquals(2, packages.size);
+        assertEquals("assets", packages.get(0).getString("name"));
+        assertEquals("assets/", packages.get(0).getString("root"));
+        assertEquals("regal", packages.get(1).getString("name"));
+        assertEquals(1, config.get("parallelPreloadSubpackages").size);
+        assertEquals("assets", config.get("parallelPreloadSubpackages").get(0).getString("name"));
+
+        assertUnknownParallelPreload(new MiniGameBackend().setBundleCodeInMainPackage(true)
+            .setParallelPreloadSubpackages(List.of("engine")), "engine");
+        assertUnknownParallelPreload(new MiniGameBackend().setBundleCodeInMainPackage(true)
+            .setParallelPreloadSubpackages(List.of("game")), "game");
+    }
+
+    @Test
+    public void rewriteFreetypeWasmPathUpdatesLoaderAndFailsOnDrift() throws IOException {
+        File loader = temp.newFile("freetype-loader.js");
+        Files.writeString(loader.toPath(), "WXWebAssembly.instantiate('subpackages/engine/freetype.wasm', imports);", StandardCharsets.UTF_8);
+        MiniGameBackend.rewriteFreetypeWasmPath(new FileHandle(loader));
+        assertEquals("WXWebAssembly.instantiate('engine/freetype.wasm', imports);", read(loader));
+        assertFailsNaming(loader, () -> MiniGameBackend.rewriteFreetypeWasmPath(new FileHandle(loader)));
+    }
+
+    @Test
+    public void verifyMainPackageSizeCountsOnlyMainPackageFilesAndRejectsOverflow() throws IOException {
+        File dir = temp.newFolder("main-size");
+        Files.write(new File(dir, "app.js").toPath(), new byte[1024]);
+        File assetsDir = new File(dir, "assets");
+        assetsDir.mkdirs();
+        Files.write(new File(assetsDir, "big.bin").toPath(), new byte[5 * 1024 * 1024]);
+        File optionalDir = new File(dir, "optional/backs");
+        optionalDir.mkdirs();
+        Files.write(new File(optionalDir, "b.bin").toPath(), new byte[5 * 1024 * 1024]);
+        assertEquals(1024L, MiniGameBackend.verifyMainPackageSize(dir));
+
+        Files.write(new File(dir, "huge.js").toPath(), new byte[4 * 1024 * 1024]);
+        try {
+            MiniGameBackend.verifyMainPackageSize(dir);
+            fail("expected 4 MiB overflow to fail");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("4 MiB"));
+        }
+    }
+
     private static void assertFailsNaming(File file, Runnable step) {
         try {
             step.run();

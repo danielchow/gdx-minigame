@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.teavm.jso.JSBody;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.typedarrays.ArrayBuffer;
 import org.teavm.jso.typedarrays.Int8Array;
@@ -39,11 +40,23 @@ public class InternalStorage extends FileDB {
     /** Rename map: logical path → renamed path on filesystem (both no leading /). */
     private final Map<String, String> renameMap = new HashMap<>();
 
+    /** Native JS rename-map object when pre-parsed by game.js via JSON.parse (avoids Java char-by-char parsing). */
+    private final JSObject jsRenameMap;
+
     public InternalStorage() {
         this.fsm = WX.getFileSystemManager();
         loadManifest();
-        loadRenameMap();
+        this.jsRenameMap = consumePreloadedRenameMap();
+        if (this.jsRenameMap == null) {
+            loadRenameMap();
+        }
     }
+
+    @JSBody(script = "var m = globalThis.__preloadedRenameMap; if (m && typeof m === 'object') { delete globalThis.__preloadedRenameMap; return m; } return null;")
+    private static native JSObject consumePreloadedRenameMap();
+
+    @JSBody(params = {"map", "key"}, script = "var v = map[key] || map['/' + key]; return typeof v === 'string' ? v : null;")
+    private static native String lookupJsRename(JSObject map, String key);
 
     // ── Path normalization ──────────────────────────────────────────
 
@@ -70,9 +83,9 @@ public class InternalStorage extends FileDB {
         String normalized = normalize(relativePath);
         String root = MiniGameAssetPackages.root(normalized);
         // Check rename map
-        String renamed = renameMap.get(normalized);
+        String renamed = jsRenameMap != null ? lookupJsRename(jsRenameMap, normalized) : renameMap.get(normalized);
         if (renamed != null) {
-            normalized = renamed;
+            normalized = normalize(renamed);
         }
         return root + normalized;
     }
@@ -85,27 +98,34 @@ public class InternalStorage extends FileDB {
             System.err.println("[InternalStorage] No assets/preload.txt found, internal files will be empty");
             return;
         }
-        String[] lines = manifest.split("\\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) continue;
-            String[] tokens = line.split(":");
+        int length = manifest.length();
+        int lineStart = 0;
+        while (lineStart < length) {
+            int lineEnd = manifest.indexOf('\n', lineStart);
+            if (lineEnd < 0) lineEnd = length;
+            int start = lineStart;
+            int end = lineEnd;
+            while (start < end && manifest.charAt(start) <= ' ') start++;
+            while (end > start && manifest.charAt(end - 1) <= ' ') end--;
+            lineStart = lineEnd + 1;
+            if (start >= end) continue;
             // Format: {fileType}:{assetType}:{path}:{size}:{overwrite}
-            // fileType = 'i' (internal) or 'c' (classpath)
-            // assetType = 'b' (binary) or 'd' (directory)
-            if (tokens.length < 3) continue;
-            String fileType = tokens[0];
-            String assetType = tokens[1];
-            String path = tokens[2];
-            // Accept both 'i:' and 'c:' entries
-            if (!"i".equals(fileType) && !"c".equals(fileType)) continue;
-            String normalized = normalize(path);
+            int firstColon = manifest.indexOf(':', start);
+            if (firstColon < 0 || firstColon >= end) continue;
+            int secondColon = manifest.indexOf(':', firstColon + 1);
+            if (secondColon < 0 || secondColon >= end) continue;
+            if (firstColon - start != 1) continue;
+            char fileType = manifest.charAt(start);
+            if (fileType != 'i' && fileType != 'c') continue;
+            boolean isDir = (secondColon - firstColon == 2) && manifest.charAt(firstColon + 1) == 'd';
+            int thirdColon = manifest.indexOf(':', secondColon + 1);
+            int pathEnd = (thirdColon >= 0 && thirdColon < end) ? thirdColon : end;
+            String normalized = normalize(manifest.substring(secondColon + 1, pathEnd));
             if (normalized.isEmpty()) continue;
-            if ("d".equals(assetType)) {
+            if (isDir) {
                 dirPaths.add(normalized);
             } else {
                 filePaths.add(normalized);
-                // Infer parent directories
                 inferDirectories(normalized);
             }
         }
@@ -115,7 +135,7 @@ public class InternalStorage extends FileDB {
         int lastSlash = filePath.lastIndexOf('/');
         while (lastSlash > 0) {
             String dir = filePath.substring(0, lastSlash);
-            dirPaths.add(dir);
+            if (!dirPaths.add(dir)) return;
             lastSlash = dir.lastIndexOf('/');
         }
     }
@@ -202,14 +222,19 @@ public class InternalStorage extends FileDB {
         return new ByteArrayInputStream(bytes);
     }
 
-    @Override
-    public byte[] readBytes(MiniGameFileHandle file) {
+    /** Reads the raw ArrayBuffer directly from WX without copying into a Java byte[]. */
+    public ArrayBuffer readArrayBuffer(MiniGameFileHandle file) {
         String normalized = normalize(file.path());
         if (!filePaths.contains(normalized)) return null;
         if (MiniGameAssetPackages.isMissing(normalized))
             throw new GdxRuntimeException("Asset package is not loaded: " + normalized);
         String wxPath = toWXPath(file.path());
-        ArrayBuffer ab = WX.fsReadFileSync(fsm, wxPath);
+        return WX.fsReadFileSync(fsm, wxPath);
+    }
+
+    @Override
+    public byte[] readBytes(MiniGameFileHandle file) {
+        ArrayBuffer ab = readArrayBuffer(file);
         if (ab == null) return null;
         Int8Array int8 = new Int8Array(ab);
         return int8.copyToJavaArray();

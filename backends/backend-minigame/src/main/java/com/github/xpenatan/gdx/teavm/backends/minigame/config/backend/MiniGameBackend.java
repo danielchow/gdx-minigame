@@ -39,6 +39,9 @@ public class MiniGameBackend extends TeaBackend {
     private static final Pattern WASM_DATA_URI =
         Pattern.compile("(\"data:application/octet-stream;base64,)([A-Za-z0-9+/=]+)(\")");
 
+    private static final long MAX_MAIN_PACKAGE_BYTES = 4L * 1024 * 1024;
+    private static final String SUBPACKAGE_FREETYPE_WASM = "'subpackages/engine/freetype.wasm'";
+
     public String appId = "";
     public String orientation = "portrait";
     /** Orientation in Windows and Mac WeChat; null uses {@link #orientation} there too. */
@@ -49,8 +52,24 @@ public class MiniGameBackend extends TeaBackend {
     public String targetFileName = "app";
     public String mainClassArgs = "";
     public AssetFilter scriptFilter;
+    private boolean bundleCodeInMainPackage = false;
     private Map<String, java.util.List<String>> deferredAssetPackages = Map.of();
     private List<String> parallelPreloadSubpackages = List.of();
+
+    /**
+     * Bundle engine scripts/WASM and the compiled game script into the main package instead of
+     * separate {@code engine} and {@code game} subpackages. Eliminates subpackage mount/IPC waits
+     * and makes {@code app.js} eligible for WeChat's main-package V8 code cache. Only enable when
+     * the main package fits within WeChat's 4 MiB limit (enforced at build time).
+     */
+    public MiniGameBackend setBundleCodeInMainPackage(boolean enabled) {
+        this.bundleCodeInMainPackage = enabled;
+        return this;
+    }
+
+    private String engineFolderPath() {
+        return bundleCodeInMainPackage ? "engine" : "subpackages/engine";
+    }
 
     /** Optional asset-only groups. Selectors are logical files, directory prefixes ending in '/', or stem prefixes ending in '.'. */
     public MiniGameBackend setDeferredAssetPackages(Map<String, java.util.List<String>> groups) {
@@ -143,19 +162,24 @@ public class MiniGameBackend extends TeaBackend {
     @Override
     protected void build(TeaCompilerData data) {
         super.build(data);
-        // Move TeaVM output (app.js) to game subpackage — can't do this in copyAssets()
-        // because TeaVM hasn't produced the file yet at that point
-        FileHandle gameFolder = releasePath.child("subpackages/game");
-        gameFolder.mkdirs();
         FileHandle appJs = releasePath.child(targetFileName + ".js");
         if (appJs.exists()) {
-            appJs.moveTo(gameFolder.child(targetFileName + ".js"));
-            System.out.println("[MiniGameBackend] Moved " + targetFileName + ".js to subpackages/game/");
+            FileHandle targetAppJs;
+            if (bundleCodeInMainPackage) {
+                targetAppJs = appJs;
+            } else {
+                // Move TeaVM output (app.js) to game subpackage — can't do this in copyAssets()
+                // because TeaVM hasn't produced the file yet at that point
+                FileHandle gameFolder = releasePath.child("subpackages/game");
+                gameFolder.mkdirs();
+                targetAppJs = gameFolder.child(targetFileName + ".js");
+                appJs.moveTo(targetAppJs);
+                System.out.println("[MiniGameBackend] Moved " + targetFileName + ".js to subpackages/game/");
+            }
 
             // Insert Module declaration after "use strict" so TeaVM's strict-mode code can access
             // the freetype Module object set by freetype.js via globalThis.Module
-            FileHandle movedAppJs = gameFolder.child(targetFileName + ".js");
-            String appContent = movedAppJs.readString();
+            String appContent = targetAppJs.readString();
             String moduleDecl = "var Module=globalThis.Module;\n";
             // Insert after the "use strict"; directive (first line)
             if (appContent.startsWith("\"use strict\";")) {
@@ -163,8 +187,41 @@ public class MiniGameBackend extends TeaBackend {
             } else {
                 appContent = moduleDecl + appContent;
             }
-            movedAppJs.writeString(appContent, false);
+            targetAppJs.writeString(appContent, false);
             System.out.println("[MiniGameBackend] Inserted Module declaration into " + targetFileName + ".js");
+        }
+        if (bundleCodeInMainPackage) {
+            verifyMainPackageSize(releasePath.file());
+        }
+    }
+
+    /** Fails the build if main-package files exceed WeChat's 4 MiB limit. */
+    static long verifyMainPackageSize(File releaseDir) {
+        long bytes = mainPackageBytes(releaseDir);
+        if (bytes > MAX_MAIN_PACKAGE_BYTES) {
+            throw new IllegalStateException("Main package exceeds WeChat's 4 MiB limit: "
+                + bytes + " bytes (limit " + MAX_MAIN_PACKAGE_BYTES + " bytes)");
+        }
+        System.out.println("[MiniGameBackend] Main package size: " + (bytes / 1024) + " KB / "
+            + (MAX_MAIN_PACKAGE_BYTES / 1024) + " KB");
+        return bytes;
+    }
+
+    static long mainPackageBytes(File releaseDir) {
+        Path root = releaseDir.toPath();
+        try (Stream<Path> walk = Files.walk(root)) {
+            return walk.filter(Files::isRegularFile)
+                .filter(p -> {
+                    String rel = root.relativize(p).toString().replace('\\', '/');
+                    return !rel.startsWith("assets/")
+                        && !rel.startsWith("subpackages/")
+                        && !rel.startsWith("optional/")
+                        && !rel.equals(PRIVATE_CONFIG_FILE);
+                })
+                .mapToLong(p -> p.toFile().length())
+                .sum();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Couldn't measure main package size in " + releaseDir, e);
         }
     }
 
@@ -221,9 +278,12 @@ public class MiniGameBackend extends TeaBackend {
 
     /** Shared by the build and its configuration-output tests. */
     String renderGameJson() {
+        Set<String> builtInSubpackages = bundleCodeInMainPackage
+            ? Set.of("assets")
+            : Set.of("engine", "game", "assets");
         JsonValue packages = new JsonValue(JsonValue.ValueType.array);
         for (String name : parallelPreloadSubpackages) {
-            if (!Set.of("engine", "game", "assets").contains(name) && !deferredAssetPackages.containsKey(name)) {
+            if (!builtInSubpackages.contains(name) && !deferredAssetPackages.containsKey(name)) {
                 throw new IllegalArgumentException("Unknown parallel preload subpackage: " + name);
             }
             JsonValue entry = new JsonValue(JsonValue.ValueType.object);
@@ -233,8 +293,12 @@ public class MiniGameBackend extends TeaBackend {
         String parallelPreload = parallelPreloadSubpackages.isEmpty() ? "" :
             TemplateUtil.resolve("parallel-preload-subpackages.json",
                 Map.of("packages", packages.toJson(JsonWriter.OutputType.json))).stripTrailing();
+        String codeSubpackages = bundleCodeInMainPackage ? "" :
+            "        { \"name\": \"engine\", \"root\": \"subpackages/engine/\" },\n"
+            + "        { \"name\": \"game\", \"root\": \"subpackages/game/\" },\n";
         return TemplateUtil.resolve("game.json",
-            Map.of("assetPackages", AssetPackages.declarations(deferredAssetPackages),
+            Map.of("codeSubpackages", codeSubpackages,
+                "assetPackages", AssetPackages.declarations(deferredAssetPackages),
                 "parallelPreloadSubpackages", parallelPreload,
                 "orientation", orientation,
                 "desktopOrientation", desktopOrientation != null ? desktopOrientation : orientation,
@@ -259,8 +323,11 @@ public class MiniGameBackend extends TeaBackend {
      * Uses parallel subpackage loading with WebGL splash screen.
      */
     private void generateGameJs(TeaCompilerData data) {
-        String js = TemplateUtil.resolve("game.js",
-            Map.of("mainClassArgs", mainClassArgs));
+        String js = bundleCodeInMainPackage
+            ? TemplateUtil.resolve("game-inline.js",
+                Map.of("mainClassArgs", mainClassArgs, "targetFileName", targetFileName))
+            : TemplateUtil.resolve("game.js",
+                Map.of("mainClassArgs", mainClassArgs));
         FileHandle gameJs = releasePath.child("game.js");
         gameJs.writeString(js, false);
     }
@@ -271,7 +338,8 @@ public class MiniGameBackend extends TeaBackend {
      * Includes real-device polyfills for window, document, performance.
      */
     private void generateAdapter() {
-        String js = TemplateUtil.resolve("adapter.js");
+        String js = TemplateUtil.resolve("adapter.js",
+            Map.of("gdxWasmPath", engineFolderPath() + "/gdx.wasm"));
         FileHandle adapterJs = releasePath.child("adapter.js");
         adapterJs.writeString(js, false);
     }
@@ -291,29 +359,25 @@ public class MiniGameBackend extends TeaBackend {
      * WeChat requires <root>/game.js as the subpackage entry point.
      */
     private void generateSubpackageEntryFiles() {
-        String engineEntry = TemplateUtil.resolve("subpackage-engine.js");
-        String gameEntry = TemplateUtil.resolve("subpackage-game.js",
-            Map.of("targetFileName", targetFileName));
         String assetsEntry = TemplateUtil.resolve("subpackage-assets.js");
-
-        releasePath.child("subpackages/engine").mkdirs();
-        releasePath.child("subpackages/game").mkdirs();
-        releasePath.child("subpackages/engine/game.js").writeString(engineEntry, false);
-        releasePath.child("subpackages/game/game.js").writeString(gameEntry, false);
+        if (!bundleCodeInMainPackage) {
+            String engineEntry = TemplateUtil.resolve("subpackage-engine.js");
+            String gameEntry = TemplateUtil.resolve("subpackage-game.js",
+                Map.of("targetFileName", targetFileName));
+            releasePath.child("subpackages/engine").mkdirs();
+            releasePath.child("subpackages/game").mkdirs();
+            releasePath.child("subpackages/engine/game.js").writeString(engineEntry, false);
+            releasePath.child("subpackages/game/game.js").writeString(gameEntry, false);
+        }
         releasePath.child("assets/game.js").writeString(assetsEntry, false);
     }
 
     /**
-     * Extract embedded WASM binary from gdx.wasm.js and write it as subpackages/engine/gdx.wasm.
-     * The JS file contains base64 WASM data in a data URL like:
-     *   O="data:application/octet-stream;base64,AGFzbQ..."
-     * We parse this out, decode the base64, and write the raw bytes as a .wasm file
-     * so WXWebAssembly.instantiate('subpackages/engine/gdx.wasm', imports) can find it.
+     * Extract embedded WASM binary from gdx.wasm.js and write it as gdx.wasm in the engine folder.
      */
     private void extractWasmFromJs() {
-        FileHandle engineFolder = releasePath.child("subpackages/engine");
+        FileHandle engineFolder = releasePath.child(engineFolderPath());
         byte[] wasmBytes = extractWasm(engineFolder.child("gdx.wasm.js"));
-        // Write the .wasm binary to subpackages/engine/ (WXWebAssembly reads from filesystem)
         engineFolder.child("gdx.wasm").writeBytes(wasmBytes, false);
         System.out.println("[MiniGameBackend] Extracted gdx.wasm (" + wasmBytes.length + " bytes) from gdx.wasm.js");
     }
@@ -376,11 +440,13 @@ public class MiniGameBackend extends TeaBackend {
             preloadTxt.writeString(cleaned, false);
         }
 
-        // Engine subpackage: scripts → subpackages/engine/
-        FileHandle engineFolder = releasePath.child("subpackages/engine");
+        // Engine scripts/WASM: engine/ when bundled in main package, subpackages/engine/ otherwise.
+        FileHandle engineFolder = releasePath.child(engineFolderPath());
         engineFolder.mkdirs();
         AssetsCopy.copyResources(classLoader, scripts, scriptFilter, engineFolder);
-        // gdx.wasm.js stays in engine folder — NO move to root
+        if (bundleCodeInMainPackage) {
+            rewriteFreetypeWasmPath(engineFolder.child("freetype-loader.js"));
+        }
 
         // Generate subpackage entry files required by WeChat
         generateSubpackageEntryFiles();
@@ -398,6 +464,19 @@ public class MiniGameBackend extends TeaBackend {
         AssetPackages.split(releasePath, deferredAssetPackages);
     }
 
+    /** Updates freetype-loader.js's WASM path when engine scripts live in the main package. */
+    static void rewriteFreetypeWasmPath(FileHandle loader) {
+        if (!loader.exists()) return;
+        String content = loader.readString("UTF-8");
+        int index = content.indexOf(SUBPACKAGE_FREETYPE_WASM);
+        if (index < 0 || content.indexOf(SUBPACKAGE_FREETYPE_WASM, index + SUBPACKAGE_FREETYPE_WASM.length()) >= 0) {
+            throw new IllegalStateException("Expected one " + SUBPACKAGE_FREETYPE_WASM + " in " + loader.path());
+        }
+        String updated = content.substring(0, index) + "'engine/freetype.wasm'"
+            + content.substring(index + SUBPACKAGE_FREETYPE_WASM.length());
+        loader.writeString(updated, false, "UTF-8");
+    }
+
     /**
      * Replace the large base64 WASM data URI in gdx.wasm.js with a 1-byte dummy (AA==).
      * The standalone gdx.wasm has already been extracted by extractWasmFromJs(),
@@ -407,7 +486,7 @@ public class MiniGameBackend extends TeaBackend {
      * Saves ~129KB in the build output.
      */
     private void replaceWasmDataUriWithDummy() {
-        FileHandle wasmJs = releasePath.child("subpackages/engine/gdx.wasm.js");
+        FileHandle wasmJs = releasePath.child(engineFolderPath() + "/gdx.wasm.js");
         int saved = replaceWasmDataUriWithDummy(wasmJs);
         System.out.println("[MiniGameBackend] Replaced WASM data URI with 1-byte dummy (saved ~" + (saved / 1024) + "KB)");
     }

@@ -8,8 +8,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.teavm.classlib.impl.nio.Buffers;
 import org.teavm.jso.JSBody;
+import org.teavm.jso.typedarrays.ArrayBuffer;
 import org.teavm.jso.typedarrays.Int32Array;
 import org.teavm.jso.typedarrays.Int8Array;
+import org.teavm.jso.webgl.WebGLRenderingContext;
 
 public class Gdx2DPixmapNative implements Disposable {
 
@@ -25,6 +27,22 @@ public class Gdx2DPixmapNative implements Disposable {
     /** Native drawing happened after the last copy into {@link #buffer}. */
     private boolean bufferStale;
     private boolean disposed;
+
+    /**
+     * Decodes encoded image bytes directly from a JS ArrayBuffer without copying through a Java byte[].
+     * @throws GdxRuntimeException if the image data could not be decoded.
+     */
+    public Gdx2DPixmapNative(ArrayBuffer encodedData, int requestedFormat) throws GdxRuntimeException {
+        nativeData = loadNativeArrayBuffer(encodedData);
+        if(nativeData == null) {
+            throw new GdxRuntimeException("Couldn't load pixmap from image data");
+        }
+        updateNativeData();
+
+        if(requestedFormat != 0 && requestedFormat != format) {
+            convert(requestedFormat);
+        }
+    }
 
     /**
      * @throws GdxRuntimeException if the image data could not be decoded.
@@ -209,6 +227,53 @@ public class Gdx2DPixmapNative implements Disposable {
     public int getFormat() {
         return format;
     }
+
+    /** True when the native WASM heap is authoritative (never edited via the Java ByteBuffer). */
+    public boolean canUploadHeapDirectly() {
+        return !disposed && (buffer == null || bufferStale) && !(heapStartIndex == 0 && heapEndIndex == 0);
+    }
+
+    /** Uploads pixels directly from Gdx.HEAPU8 to WebGL without allocating/copying a Java ByteBuffer. */
+    public void uploadToGL(WebGLRenderingContext gl, int target, int glInternalFormat, int glFormat, int glType) {
+        if (disposed || (heapStartIndex == 0 && heapEndIndex == 0)) return;
+        uploadHeapToGLNative(gl, target, glInternalFormat, width, height, glFormat, glType, heapStartIndex, heapEndIndex);
+    }
+
+    @JSBody(params = {"gl", "target", "internalformat", "width", "height", "format", "type", "start", "end"}, script = "" +
+            "gl.texImage2D(target, 0, internalformat, width, height, 0, format, type, Gdx.HEAPU8.subarray(start, end));"
+    )
+    private static native void uploadHeapToGLNative(WebGLRenderingContext gl, int target, int internalformat,
+            int width, int height, int format, int type, int start, int end);
+
+    @JSBody(params = {"arrayBuffer"}, script = "" +
+            "var view = new Uint8Array(arrayBuffer);" +
+            "var len = view.byteLength;" +
+            "var cBuffer = Gdx._malloc(len);" +
+            "Gdx.HEAPU8.set(view, cBuffer);" +
+            "var pixmap = Gdx.Gdx.prototype.g2d_load(cBuffer, 0, len);" +
+            "Gdx._free(cBuffer);" +
+            "if(pixmap === null || Gdx.getPointer(pixmap) === 0) {" +
+            "   return null;" +
+            "}" +
+            "var pixels = Gdx.Gdx.prototype.g2d_get_pixels(pixmap);" +
+            "var pixmapAddr = Gdx.getPointer(pixmap);" +
+            "var format = pixmap.get_format();" +
+            "var width = pixmap.get_width();" +
+            "var height = pixmap.get_height();" +
+            "var bytesPerPixel = Gdx.Gdx.prototype.g2d_bytes_per_pixel(format);" +
+            "var bytesSize = width * height * bytesPerPixel;" +
+            "var startIndex = pixels;" +
+            "var endIndex = startIndex + bytesSize;" +
+            "var nativeData = new Int32Array(6);" +
+            "nativeData[0] = pixmapAddr;" +
+            "nativeData[1] = width;" +
+            "nativeData[2] = height;" +
+            "nativeData[3] = format;" +
+            "nativeData[4] = startIndex;" +
+            "nativeData[5] = endIndex;" +
+            "return nativeData;"
+    )
+    private static native Int32Array loadNativeArrayBuffer(ArrayBuffer arrayBuffer);
 
     public Int8Array getHeapData(boolean shouldCopy) {
         if(heapStartIndex == 0 && heapEndIndex == 0) {

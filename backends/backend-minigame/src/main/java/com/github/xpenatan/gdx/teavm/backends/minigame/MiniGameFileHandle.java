@@ -17,6 +17,9 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.UnsupportedEncodingException;
+import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.FileDB;
+import com.github.xpenatan.gdx.teavm.backends.minigame.filesystem.types.InternalStorage;
+import org.teavm.jso.typedarrays.ArrayBuffer;
 import java.io.Writer;
 
 /**
@@ -94,6 +97,22 @@ public class MiniGameFileHandle extends FileHandle {
      *
      * @throws GdxRuntimeException if the file handle represents a directory, doesn't exist, or could not be read.
      */
+    /** Reads an internal/classpath asset as a raw JS ArrayBuffer without copying into a Java byte[]. */
+    public ArrayBuffer readArrayBuffer() {
+        FileDB db = files.getFileDB(type);
+        if (db instanceof InternalStorage) {
+            ArrayBuffer ab = ((InternalStorage) db).readArrayBuffer(this);
+            if (ab != null) return ab;
+        }
+        if (type == FileType.Internal) {
+            FileDB cp = files.getFileDB(FileType.Classpath);
+            if (cp instanceof InternalStorage && cp != db) {
+                return ((InternalStorage) cp).readArrayBuffer(this);
+            }
+        }
+        return null;
+    }
+
     @Override
     public InputStream read() {
         boolean exists = files.getFileDB(type).exists(this);

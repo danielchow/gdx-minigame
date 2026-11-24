@@ -123,3 +123,39 @@ test('file handles keep their type for equals and hashCode', () => {
     assert.equal(results['fh-hash-same'], 'true');
     assert.equal(results['fh-map'], 'internal,2');
 });
+
+test('InternalStorage uses preloaded JS rename map with leading-slash keys without reading rename-map.json', () => {
+    const storage = new Map(Object.entries(seed));
+    const report = {log: [], results: {}};
+    const readPaths = [];
+    const renamedPackaged = {
+        'assets/preload.txt': 'i:b:present.txt:3:0\n',
+        'assets/renamed-present.txt': 'hi!',
+    };
+    const fsm = {
+        readFileSync(path, encoding) {
+            readPaths.push(path);
+            if (!(path in renamedPackaged)) throw new Error('no such file: ' + path);
+            const text = renamedPackaged[path];
+            return encoding ? text : new TextEncoder().encode(text).buffer;
+        },
+        mkdirSync() {},
+    };
+    const wx = {
+        env: {USER_DATA_PATH: 'wxfile://usr'},
+        getFileSystemManager: () => fsm,
+        getStorageInfoSync: () => ({keys: [...storage.keys()]}),
+        getStorageSync: key => storage.has(key) ? storage.get(key) : '',
+        setStorageSync(key, value) { storage.set(key, String(value)); },
+        removeStorageSync(key) { storage.delete(key); },
+    };
+    const context = vm.createContext({exports: {}, console, performance, wx, __storageProbe: report,
+        __preloadedRenameMap: {'/present.txt': '/renamed-present.txt'},
+        setTimeout() {}, clearTimeout() {}});
+    vm.runInContext(readFileSync(app, 'utf8'), context, {timeout: 5000});
+    vm.runInContext('exports.main([], error => {if (error) throw error;})', context, {timeout: 5000});
+    assert.equal(report.results['loader-present'], 'success:present.txt:hi!');
+    assert.equal(report.results['manager-present'], 'loaded:hi!');
+    assert.ok(!readPaths.includes('assets/rename-map.json'), 'preloaded JS map should skip reading rename-map.json');
+    assert.equal(context.__preloadedRenameMap, undefined, 'preloaded rename map should be consumed once');
+});

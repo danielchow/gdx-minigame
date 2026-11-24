@@ -113,21 +113,19 @@ public class MiniGameApplication implements Application {
         graphics = createGraphics(config);
         graphics.setFrameRequester(this::requestRendering);
         input = new MiniGameInput(this, graphics);
-        files = new MiniGameFiles(config, this);
         net = new MiniGameNet();
         logger = new WebApplicationLogger();
         clipboard = new MiniGameClipboard();
 
         initNativeLibraries();
 
-        // Set Gdx singletons
+        // Set non-file Gdx singletons immediately so listeners/constructors can query graphics/app.
         Gdx.app = this;
         Gdx.graphics = graphics;
         Gdx.gl = graphics.getGL20();
         Gdx.gl20 = graphics.getGL20();
         Gdx.gl30 = graphics.getGL30();
         Gdx.input = input;
-        Gdx.files = files;
         AssetInstance.setInstance(new MiniGameAssetDownloader());
         AssetInstance.setInstance(new MiniGameAssetLoader());
         Gdx.net = net;
@@ -147,7 +145,54 @@ public class MiniGameApplication implements Application {
         WX.onAudioInterruptionBegin((OnHideCallback) () -> audio.onInterruptionBegin());
         WX.onAudioInterruptionEnd((OnHideCallback) () -> audio.onInterruptionEnd());
 
-        requestRendering();
+        // When game-inline.js runs main() in parallel with the assets subpackage, defer
+        // InternalStorage and the first app step until assets mount and splash handoff completes.
+        if (hasAssetsReadyGate()) {
+            awaitAssetsReadyGate(this::completeAssetInit);
+        } else {
+            completeAssetInit();
+        }
+    }
+
+    private void completeAssetInit() {
+        files = new MiniGameFiles(config, this);
+        Gdx.files = files;
+        if (config.deferFirstFrameToRaf) {
+            requestRendering();
+        } else {
+            scheduleInitialMicrotask();
+        }
+    }
+
+    @JSBody(script = "var p = globalThis.__miniGameAssetsReady; return !!(p && typeof p.then === 'function');")
+    private static native boolean hasAssetsReadyGate();
+
+    @JSBody(params = "cb", script = "var p = globalThis.__miniGameAssetsReady; delete globalThis.__miniGameAssetsReady; p.then(cb);")
+    private static native void awaitAssetsReadyGate(MicrotaskCallback cb);
+
+    private void scheduleInitialMicrotask() {
+        if (files == null || hidden || stepError || frameRunning) return;
+        renderRequested = true;
+        final int generation = ++frameGeneration;
+        enqueueMicrotask(() -> {
+            if (generation != frameGeneration || hidden || stepError || frameRunning) return;
+            renderRequested = false;
+            frameRunning = true;
+            try {
+                step(curListener);
+            } finally {
+                frameRunning = false;
+                scheduleFrame();
+            }
+        });
+    }
+
+    @JSBody(params = "cb", script = "Promise.resolve().then(cb);")
+    private static native void enqueueMicrotask(MicrotaskCallback cb);
+
+    @org.teavm.jso.JSFunctor
+    private interface MicrotaskCallback extends JSObject {
+        void run();
     }
 
     /** Coalesces requests from input, postRunnable and JS timers into the next RAF. */
@@ -157,7 +202,7 @@ public class MiniGameApplication implements Application {
     }
 
     private void scheduleFrame() {
-        if (hidden || stepError || frameRunning || pendingFrame != -1) return;
+        if (files == null || hidden || stepError || frameRunning || pendingFrame != -1) return;
         if (!renderRequested && !graphics.isContinuousRendering()) return;
         final int generation = ++frameGeneration;
         pendingFrame = WX.requestAnimationFrame(timestamp -> {

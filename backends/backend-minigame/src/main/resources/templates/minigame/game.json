@@ -8,8 +8,6 @@
         "downloadFile": 500000
     },
     "subpackages": [
-        { "name": "engine", "root": "subpackages/engine/" },
-        { "name": "game", "root": "subpackages/game/" },
-        { "name": "assets", "root": "assets/" }${assetPackages}
+${codeSubpackages}        { "name": "assets", "root": "assets/" }${assetPackages}
     ]${parallelPreloadSubpackages}
 }

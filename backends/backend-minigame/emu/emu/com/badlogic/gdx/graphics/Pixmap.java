@@ -12,11 +12,14 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetInstance;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetLoaderListener;
+import com.github.xpenatan.gdx.teavm.backends.minigame.MiniGameFileHandle;
 import com.github.xpenatan.gdx.teavm.backends.minigame.dom.typedarray.TypedArrays;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.AssetType;
 import com.github.xpenatan.gdx.teavm.backends.web.assetloader.WebBlob;
 import java.nio.ByteBuffer;
+import org.teavm.jso.typedarrays.ArrayBuffer;
 import org.teavm.jso.typedarrays.TypedArray;
+import org.teavm.jso.webgl.WebGLRenderingContext;
 
 public class Pixmap implements Disposable, PixmapNativeInterface {
 
@@ -93,8 +96,20 @@ public class Pixmap implements Disposable, PixmapNativeInterface {
         if(!file.exists()) {
             throw new GdxRuntimeException("File is null, it does not exist: " + path);
         }
+        if (file instanceof MiniGameFileHandle) {
+            ArrayBuffer ab = ((MiniGameFileHandle) file).readArrayBuffer();
+            if (ab != null) {
+                nativePixmap = new Gdx2DPixmap(ab, 0);
+                return;
+            }
+        }
         byte[] bytes = file.readBytes();
         nativePixmap = new Gdx2DPixmap(bytes, 0, bytes.length, 0);
+    }
+
+    /** Uploads decoded native pixels directly to WebGL without copying into a Java ByteBuffer. */
+    public void uploadToGL(WebGLRenderingContext gl, int target) {
+        nativePixmap.uploadToGL(gl, target);
     }
 
     public Pixmap(byte[] encodedData, int offset, int len) {

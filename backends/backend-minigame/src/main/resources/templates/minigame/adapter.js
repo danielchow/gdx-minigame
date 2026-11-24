@@ -83,7 +83,7 @@ if (typeof WXWebAssembly !== 'undefined') {
     // WXWebAssembly loads the extracted gdx.wasm from the package instead.
     WebAssembly.instantiate = function(source, imports) {
         if (source instanceof ArrayBuffer || source instanceof Uint8Array) {
-            return WXWebAssembly.instantiate('subpackages/engine/gdx.wasm', imports);
+            return WXWebAssembly.instantiate('${gdxWasmPath}', imports);
         }
         return originalInstantiate ? originalInstantiate(source, imports) : Promise.reject(new Error('No WASM support'));
     };
