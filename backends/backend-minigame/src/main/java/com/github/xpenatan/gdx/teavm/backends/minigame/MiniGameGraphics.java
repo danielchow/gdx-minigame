@@ -73,6 +73,7 @@ public class MiniGameGraphics implements Graphics {
     private double screenHeight;
     private boolean keyboardActive;
     private boolean keyboardHeightOpen;
+    private boolean keyboardListenersRegistered;
     private double lastKeyboardEventMs = Double.NEGATIVE_INFINITY;
 
     public MiniGameGraphics(MiniGameApplicationConfiguration config) {
@@ -85,21 +86,6 @@ public class MiniGameGraphics implements Graphics {
         // desktop WeChat can still be opening its window then, which left a squashed canvas
         // that WeChat stretched over the final window.
         applyWindowMetrics(null);
-        if (mobilePlatform) {
-            registerKeyboardListeners(
-                height -> {
-                    boolean wasOpen = keyboardHeightOpen;
-                    keyboardHeightOpen = height > 0;
-                    if (wasOpen && !keyboardHeightOpen) keyboardActive = false;
-                    lastKeyboardEventMs = nowMs();
-                },
-                () -> {
-                    keyboardHeightOpen = false;
-                    keyboardActive = false;
-                    lastKeyboardEventMs = nowMs();
-                }
-            );
-        }
         WX.onWindowResize((LifecycleCallback) resize -> {
             if (applyWindowMetrics(resize)) {
                 requestRendering();
@@ -278,10 +264,29 @@ public class MiniGameGraphics implements Graphics {
      * height-only resizes so the game surface does not jump while the keyboard opens or closes.
      */
     public void setKeyboardActive(boolean active) {
-        if (active || keyboardActive) {
+        if (active && mobilePlatform && !keyboardListenersRegistered) {
+            keyboardListenersRegistered = true;
+            registerKeyboardListeners(
+                height -> {
+                    boolean wasOpen = keyboardHeightOpen;
+                    keyboardHeightOpen = height > 0;
+                    if (wasOpen && !keyboardHeightOpen) keyboardActive = false;
+                    lastKeyboardEventMs = nowMs();
+                },
+                () -> {
+                    keyboardHeightOpen = false;
+                    keyboardActive = false;
+                    lastKeyboardEventMs = nowMs();
+                }
+            );
+        }
+        if (active || keyboardActive || keyboardHeightOpen) {
             lastKeyboardEventMs = nowMs();
         }
         keyboardActive = active;
+        if (!active) {
+            keyboardHeightOpen = false;
+        }
     }
 
     private boolean isKeyboardResizeWindow() {

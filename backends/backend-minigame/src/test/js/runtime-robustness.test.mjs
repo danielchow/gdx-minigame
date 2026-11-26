@@ -613,12 +613,17 @@ test('mobile keyboard height-only window resizes are ignored while active and se
 
     // Opening keyboard triggers setKeyboardActive(true) before wx.showKeyboard, then Android fires
     // a transient height-only onWindowResize before onKeyboardHeightChange arrives.
+    android.command('continuous', 0);
+    android.runFrames();
+    assert.equal(android.pendingFrames(), 0);
     android.command('setKeyboardActive', 1);
     android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
+    assert.equal(android.pendingFrames(), 0, 'ignored keyboard resize must not wake a dormant loop');
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 2400]);
     assert.deepEqual([android.values('resizeWidth'), android.values('resizeHeight')], [[1080], [2400]],
         'transient keyboard-open height-only resize must not resize canvas or app');
+    android.command('continuous', 1);
 
     // Keyboard opens, then closes; trailing onWindowResize within 600ms settle window is also ignored.
     android.fire('keyboardHeightChange', {height: 260});
@@ -642,14 +647,44 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 1500]);
     assert.deepEqual(android.values('resizeHeight'), [2400, 1500]);
 
-    // Rotation (width change) while keyboard is open must still resize immediately.
+    // Closing via setKeyboardActive(0) (e.g. onPause/Cancel) without a trailing keyboardHeightChange(0)
+    // or keyboardComplete must clear keyboardHeightOpen so future height-only resizes are not permanently latched.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 260});
+    android.command('setKeyboardActive', 0);
+    fakeNow += 700;
+    Object.assign(android.windowInfo, {windowHeight: 800});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 800});
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1500, 2400],
+        'setKeyboardActive(false) clears latched keyboardHeightOpen after settle window');
+
+    // Also test wx.onHide clearing latched keyboardHeightOpen cleanly.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 260});
+    android.fire('hide');
+    android.fire('show', {});
+    fakeNow += 700;
+    Object.assign(android.windowInfo, {windowHeight: 500});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1500, 2400, 1500],
+        'hide() clears latched keyboardHeightOpen so post-resume split-screen resizes apply');
+
+    // pixelRatio change while keyboard is open still applies immediately.
     android.command('setKeyboardActive', 1);
     android.fire('keyboardHeightChange', {height: 200});
-    Object.assign(android.windowInfo, {screenWidth: 800, screenHeight: 360, windowWidth: 800, windowHeight: 360});
+    Object.assign(android.windowInfo, {pixelRatio: 2, windowHeight: 500});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [720, 1000]);
+
+    // Rotation (width change) while keyboard is open must still resize immediately.
+    Object.assign(android.windowInfo, {pixelRatio: 3, screenWidth: 800, screenHeight: 360, windowWidth: 800, windowHeight: 360});
     android.fire('windowResize', {windowWidth: 800, windowHeight: 360});
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [2400, 1080]);
-    assert.deepEqual(android.values('resizeWidth'), [1080, 1080, 2400]);
+    assert.deepEqual(android.values('resizeWidth'), [1080, 1080, 1080, 1080, 720, 2400]);
 
     // Desktop WeChat height-only window resizing is never suppressed.
     const mac = startProbe('mac', noopProxy(), {

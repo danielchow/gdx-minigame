@@ -252,6 +252,7 @@ public class MiniGameApplication implements Application {
         }
         // After the listeners, so music the game pauses itself is not resumed on show
         audio.onHide();
+        if (graphics != null) graphics.setKeyboardActive(false);
     }
 
     private void show() {
