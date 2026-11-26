@@ -13,10 +13,12 @@ import com.badlogic.gdx.graphics.glutils.GLVersion;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.LifecycleCallback;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WX;
 import com.github.xpenatan.gdx.teavm.backends.minigame.bindings.WXWindowInfo;
+import com.github.xpenatan.gdx.teavm.backends.minigame.dom.MiniGameNavigator;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGL2RenderingContextExt;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLContextAttributesExt;
 import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLRenderingContextExt;
 import org.teavm.jso.JSBody;
+import org.teavm.jso.JSFunctor;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.dom.html.HTMLCanvasElement;
 import org.teavm.jso.webgl.WebGLContextAttributes;
@@ -58,6 +60,8 @@ public class MiniGameGraphics implements Graphics {
 
     // wx.getWindowInfo() is a synchronous native call. Layout code reads density and safe insets
     // per widget, so they are cached here and refreshed on wx.onWindowResize.
+    private static final double KEYBOARD_RESIZE_SETTLE_MS = 600.0;
+    private final boolean mobilePlatform;
     private double pixelRatio = 1;
     private int safeInsetTop;
     private int safeInsetLeft;
@@ -66,19 +70,40 @@ public class MiniGameGraphics implements Graphics {
     // Logical size of the window the canvas fills; touches arrive in these units.
     private double windowWidth;
     private double windowHeight;
+    private double screenHeight;
+    private boolean keyboardActive;
+    private boolean keyboardHeightOpen;
+    private double lastKeyboardEventMs = Double.NEGATIVE_INFINITY;
 
     public MiniGameGraphics(MiniGameApplicationConfiguration config) {
         this.config = config;
         this.canvas = (HTMLCanvasElement) config.canvas;
+        this.mobilePlatform = isMobilePlatform(MiniGameNavigator.getPlatform());
 
         // The canvas is sized in physical pixels, like the web backend provides, from the window
         // as it is now: wx.createCanvas() ran in game.js before the subpackages loaded, and
         // desktop WeChat can still be opening its window then, which left a squashed canvas
         // that WeChat stretched over the final window.
-        updateWindowMetrics(null);
+        applyWindowMetrics(null);
+        if (mobilePlatform) {
+            registerKeyboardListeners(
+                height -> {
+                    boolean wasOpen = keyboardHeightOpen;
+                    keyboardHeightOpen = height > 0;
+                    if (wasOpen && !keyboardHeightOpen) keyboardActive = false;
+                    lastKeyboardEventMs = nowMs();
+                },
+                () -> {
+                    keyboardHeightOpen = false;
+                    keyboardActive = false;
+                    lastKeyboardEventMs = nowMs();
+                }
+            );
+        }
         WX.onWindowResize((LifecycleCallback) resize -> {
-            updateWindowMetrics(resize);
-            requestRendering();
+            if (applyWindowMetrics(resize)) {
+                requestRendering();
+            }
         });
 
         WebGLContextAttributesExt attr = (WebGLContextAttributesExt) WebGLContextAttributes.create();
@@ -242,6 +267,63 @@ public class MiniGameGraphics implements Graphics {
         return pixelRatio;
     }
 
+    private static boolean isMobilePlatform(String platform) {
+        return "android".equals(platform) || "ios".equals(platform) || "ohos".equals(platform);
+    }
+
+    /**
+     * Marks whether a soft keyboard session is active. On mobile WeChat (notably Android),
+     * showing or hiding the soft keyboard can transiently change {@code windowHeight} via
+     * {@code wx.onWindowResize}; tracking keyboard state lets graphics ignore those transient
+     * height-only resizes so the game surface does not jump while the keyboard opens or closes.
+     */
+    public void setKeyboardActive(boolean active) {
+        if (active || keyboardActive) {
+            lastKeyboardEventMs = nowMs();
+        }
+        keyboardActive = active;
+    }
+
+    private boolean isKeyboardResizeWindow() {
+        return keyboardActive || keyboardHeightOpen
+            || (nowMs() - lastKeyboardEventMs) < KEYBOARD_RESIZE_SETTLE_MS;
+    }
+
+    private boolean shouldIgnoreMobileKeyboardResize(
+            double nextWindowWidth, double nextPixelRatio, double nextScreenHeight) {
+        return mobilePlatform
+            && nextWindowWidth == windowWidth
+            && nextPixelRatio == pixelRatio
+            && nextScreenHeight == screenHeight
+            && isKeyboardResizeWindow();
+    }
+
+    @JSFunctor
+    private interface KeyboardHeightCallback extends JSObject {
+        void onHeightChange(double height);
+    }
+
+    @JSFunctor
+    private interface KeyboardCompleteCallback extends JSObject {
+        void onComplete();
+    }
+
+    @JSBody(script = "return Date.now();")
+    private static native double nowMs();
+
+    @JSBody(
+        params = {"onHeight", "onComplete"},
+        script = "if (typeof wx.onKeyboardHeightChange === 'function') {"
+            + " wx.onKeyboardHeightChange(function(keyboardEvent) {"
+            + " var nextHeight = keyboardEvent && typeof keyboardEvent.height === 'number' ? keyboardEvent.height : 0;"
+            + " onHeight(nextHeight);"
+            + " }); }"
+            + " if (typeof wx.onKeyboardComplete === 'function') {"
+            + " wx.onKeyboardComplete(function() { onComplete(); }); }"
+    )
+    private static native void registerKeyboardListeners(
+        KeyboardHeightCallback onHeight, KeyboardCompleteCallback onComplete);
+
     @JSBody(params = "resize", script = "return resize.windowWidth || 0;")
     private static native double windowWidthOf(JSObject resize);
 
@@ -259,13 +341,25 @@ public class MiniGameGraphics implements Graphics {
      * pixels; insets in physical pixels.
      */
     protected void updateWindowMetrics(JSObject resize) {
+        applyWindowMetrics(resize);
+    }
+
+    private boolean applyWindowMetrics(JSObject resize) {
         WXWindowInfo info = WX.getWindowInfo();
-        pixelRatio = info.getPixelRatio();
+        double nextPixelRatio = info.getPixelRatio();
         // The event's size is the new one; desktop WeChat's getWindowInfo() can still lag behind it.
         double eventWidth = resize != null ? windowWidthOf(resize) : 0;
         double eventHeight = resize != null ? windowHeightOf(resize) : 0;
-        windowWidth = eventWidth > 0 ? eventWidth : info.getWindowWidth();
-        windowHeight = eventHeight > 0 ? eventHeight : info.getWindowHeight();
+        double nextWindowWidth = eventWidth > 0 ? eventWidth : info.getWindowWidth();
+        double nextWindowHeight = eventHeight > 0 ? eventHeight : info.getWindowHeight();
+        double nextScreenHeight = info.getScreenHeight();
+        if (resize != null && shouldIgnoreMobileKeyboardResize(nextWindowWidth, nextPixelRatio, nextScreenHeight)) {
+            return false;
+        }
+        pixelRatio = nextPixelRatio;
+        windowWidth = nextWindowWidth;
+        windowHeight = nextWindowHeight;
+        screenHeight = nextScreenHeight;
         int width = (int) (windowWidth * pixelRatio);
         int height = (int) (windowHeight * pixelRatio);
         // Assigning a size clears the drawing buffer even when it is unchanged.
@@ -274,12 +368,13 @@ public class MiniGameGraphics implements Graphics {
         WXWindowInfo.SafeArea safeArea = info.getSafeArea();
         if (safeArea == null) {
             safeInsetTop = safeInsetLeft = safeInsetBottom = safeInsetRight = 0;
-            return;
+            return true;
         }
         safeInsetTop = (int) (safeArea.getTop() * pixelRatio);
         safeInsetLeft = (int) (safeArea.getLeft() * pixelRatio);
         safeInsetBottom = (int) ((info.getScreenHeight() - safeArea.getBottom()) * pixelRatio);
         safeInsetRight = (int) ((info.getScreenWidth() - safeArea.getRight()) * pixelRatio);
+        return true;
     }
 
     // === Display (WeChat is always fullscreen) ===

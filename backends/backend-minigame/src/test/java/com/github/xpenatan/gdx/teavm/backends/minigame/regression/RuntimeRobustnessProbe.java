@@ -208,6 +208,7 @@ public final class RuntimeRobustnessProbe {
                         GL20.GL_UNSIGNED_BYTE, BufferUtils.newByteBuffer(4));
                     return 0;
                 case "densityTimes100": return (int) Math.round(((MiniGameGraphics) Gdx.graphics).getNativeScreenDensity() * 100);
+                case "setKeyboardActive": ((MiniGameGraphics) Gdx.graphics).setKeyboardActive(arg != 0); return 0;
                 default: throw new IllegalArgumentException(command);
             }
         });

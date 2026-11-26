@@ -180,6 +180,7 @@ public class MiniGameInput extends AbstractInput {
     }
 
     @Override public void setOnscreenKeyboardVisible(boolean visible) {
+        graphics.setKeyboardActive(visible);
         if (visible) WX.showKeyboard(null); else WX.hideKeyboard();
     }
     @Override public void setOnscreenKeyboardVisible(boolean visible, OnscreenKeyboardType type) {

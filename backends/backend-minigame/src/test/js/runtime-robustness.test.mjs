@@ -88,6 +88,8 @@ function startProbe(platform = 'devtools', console = noopProxy(), {canvas: canva
         onTouchStart: on('touchstart'), onTouchMove: on('touchmove'),
         onTouchEnd: on('touchend'), onTouchCancel: on('touchcancel'),
         onKeyDown: on('keydown'), onKeyUp: on('keyup'), onKeyboardInput: on('keyboardinput'),
+        onKeyboardHeightChange: on('keyboardHeightChange'),
+        onKeyboardComplete: on('keyboardComplete'),
         showModal: options => modals.push(options),
         restartMiniProgram: options => restarts.push(options),
         exitMiniProgram: options => exits.push(options),
@@ -593,4 +595,72 @@ test('failure inside completeAssetInit shows the fatal restart modal instead of 
     await Promise.resolve();
     assert.equal(p.modals.length, 1, 'completeAssetInit failure must trigger fatal modal');
     assert.equal(p.pendingFrames(), 0);
+});
+
+test('mobile keyboard height-only window resizes are ignored while active and settling, but rotations and desktop still resize', () => {
+    let fakeNow = 10_000;
+    class FakeDate extends Date {
+        static now() { return fakeNow; }
+    }
+    const android = startProbe('android', noopProxy(), {
+        canvas: {width: 1080, height: 2400},
+        window: {pixelRatio: 3, screenWidth: 360, screenHeight: 800, windowWidth: 360, windowHeight: 800},
+        globals: {Date: FakeDate},
+    });
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 2400]);
+    assert.deepEqual([android.values('resizeWidth'), android.values('resizeHeight')], [[1080], [2400]]);
+
+    // Opening keyboard triggers setKeyboardActive(true) before wx.showKeyboard, then Android fires
+    // a transient height-only onWindowResize before onKeyboardHeightChange arrives.
+    android.command('setKeyboardActive', 1);
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 2400]);
+    assert.deepEqual([android.values('resizeWidth'), android.values('resizeHeight')], [[1080], [2400]],
+        'transient keyboard-open height-only resize must not resize canvas or app');
+
+    // Keyboard opens, then closes; trailing onWindowResize within 600ms settle window is also ignored.
+    android.fire('keyboardHeightChange', {height: 260});
+    fakeNow += 2000;
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400], 'height-only resize while keyboard is open is ignored');
+
+    android.fire('keyboardHeightChange', {height: 0});
+    android.fire('keyboardComplete', {});
+    fakeNow += 300;
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400], 'trailing resize inside 600ms settle window is ignored');
+
+    // After the 600ms settle window, a genuine non-keyboard height resize (e.g. split-screen) still applies.
+    fakeNow += 400;
+    Object.assign(android.windowInfo, {windowHeight: 500});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 1500]);
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1500]);
+
+    // Rotation (width change) while keyboard is open must still resize immediately.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 200});
+    Object.assign(android.windowInfo, {screenWidth: 800, screenHeight: 360, windowWidth: 800, windowHeight: 360});
+    android.fire('windowResize', {windowWidth: 800, windowHeight: 360});
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [2400, 1080]);
+    assert.deepEqual(android.values('resizeWidth'), [1080, 1080, 2400]);
+
+    // Desktop WeChat height-only window resizing is never suppressed.
+    const mac = startProbe('mac', noopProxy(), {
+        canvas: {width: 800, height: 1200},
+        window: {pixelRatio: 2, screenWidth: 1440, screenHeight: 900, windowWidth: 400, windowHeight: 600},
+        globals: {Date: FakeDate},
+    });
+    mac.runFrames();
+    mac.command('setKeyboardActive', 1);
+    mac.fire('windowResize', {windowWidth: 400, windowHeight: 500});
+    mac.runFrames();
+    assert.deepEqual([mac.command('graphicsWidth'), mac.command('graphicsHeight')], [800, 1000]);
+    assert.deepEqual(mac.values('resizeHeight'), [1200, 1000]);
 });
