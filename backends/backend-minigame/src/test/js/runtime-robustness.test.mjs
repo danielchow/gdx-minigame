@@ -597,15 +597,64 @@ test('failure inside completeAssetInit shows the fatal restart modal instead of 
     assert.equal(p.pendingFrames(), 0);
 });
 
-test('mobile keyboard height-only window resizes are ignored while active and settling, but rotations and desktop still resize', () => {
-    let fakeNow = 10_000;
+function createFakeClock(startMs = 10_000, {noopClear = false} = {}) {
+    let now = startMs;
+    let nextId = 0;
+    const timers = new Map();
+    const scheduled = [];
     class FakeDate extends Date {
-        static now() { return fakeNow; }
+        static now() { return now; }
     }
+    return {
+        globals: {
+            Date: FakeDate,
+            setTimeout(fn, delay = 0) {
+                const id = nextId++; // intentionally starts at 0 to test falsy numeric timer IDs
+                const entry = {id, fn, delay, dueAt: now + delay};
+                timers.set(id, entry);
+                scheduled.push(entry);
+                return id;
+            },
+            clearTimeout(id) {
+                if (!noopClear) timers.delete(id);
+            },
+        },
+        now: () => now,
+        setNow(value) { now = value; },
+        advance(ms) { now += ms; },
+        pendingCount: () => timers.size,
+        scheduled,
+        flushDue() {
+            let ran = 0;
+            while (true) {
+                const due = [...timers.values()].filter(t => t.dueAt <= now).sort((a, b) => a.dueAt - b.dueAt);
+                if (due.length === 0) break;
+                const next = due[0];
+                timers.delete(next.id);
+                next.fn();
+                ran++;
+            }
+            return ran;
+        },
+        runAll() {
+            let ran = 0;
+            while (timers.size > 0) {
+                const next = [...timers.values()].sort((a, b) => a.dueAt - b.dueAt)[0];
+                timers.delete(next.id);
+                next.fn();
+                ran++;
+            }
+            return ran;
+        },
+    };
+}
+
+test('mobile keyboard height-only window resizes are ignored while active and settling, but rotations and desktop still resize', () => {
+    const clock = createFakeClock(10_000);
     const android = startProbe('android', noopProxy(), {
         canvas: {width: 1080, height: 2400},
         window: {pixelRatio: 3, screenWidth: 360, screenHeight: 800, windowWidth: 360, windowHeight: 800},
-        globals: {Date: FakeDate},
+        globals: clock.globals,
     });
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 2400]);
@@ -619,6 +668,7 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     android.command('setKeyboardActive', 1);
     android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
     assert.equal(android.pendingFrames(), 0, 'ignored keyboard resize must not wake a dormant loop');
+    assert.equal(clock.pendingCount(), 0, 'no reconcile timer while keyboard is still active');
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 2400]);
     assert.deepEqual([android.values('resizeWidth'), android.values('resizeHeight')], [[1080], [2400]],
@@ -627,22 +677,25 @@ test('mobile keyboard height-only window resizes are ignored while active and se
 
     // Keyboard opens, then closes; trailing onWindowResize within 600ms settle window is also ignored.
     android.fire('keyboardHeightChange', {height: 260});
-    fakeNow += 2000;
+    clock.advance(2000);
     android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
     android.runFrames();
     assert.deepEqual(android.values('resizeHeight'), [2400], 'height-only resize while keyboard is open is ignored');
 
     android.fire('keyboardHeightChange', {height: 0});
     android.fire('keyboardComplete', {});
-    fakeNow += 300;
+    assert.equal(clock.pendingCount(), 1, 'closing keyboard schedules one settle reconcile timer');
+    clock.advance(300);
     android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
     android.runFrames();
     assert.deepEqual(android.values('resizeHeight'), [2400], 'trailing resize inside 600ms settle window is ignored');
 
-    // After the 600ms settle window, a genuine non-keyboard height resize (e.g. split-screen) still applies.
-    fakeNow += 400;
+    // After the 600ms settle window, a genuine non-keyboard height resize (e.g. split-screen) still applies
+    // and cancels the pending reconcile timer.
+    clock.advance(400);
     Object.assign(android.windowInfo, {windowHeight: 500});
     android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
+    assert.equal(clock.pendingCount(), 0, 'applied resize cancels deferred reconcile timer');
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 1500]);
     assert.deepEqual(android.values('resizeHeight'), [2400, 1500]);
@@ -652,7 +705,7 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     android.command('setKeyboardActive', 1);
     android.fire('keyboardHeightChange', {height: 260});
     android.command('setKeyboardActive', 0);
-    fakeNow += 700;
+    clock.advance(700);
     Object.assign(android.windowInfo, {windowHeight: 800});
     android.fire('windowResize', {windowWidth: 360, windowHeight: 800});
     android.runFrames();
@@ -664,7 +717,7 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     android.fire('keyboardHeightChange', {height: 260});
     android.fire('hide');
     android.fire('show', {});
-    fakeNow += 700;
+    clock.advance(700);
     Object.assign(android.windowInfo, {windowHeight: 500});
     android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
     android.runFrames();
@@ -685,12 +738,13 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     android.runFrames();
     assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [2400, 1080]);
     assert.deepEqual(android.values('resizeWidth'), [1080, 1080, 1080, 1080, 720, 2400]);
+    assert.equal(clock.pendingCount(), 0, 'no leaked reconcile timers');
 
     // Desktop WeChat height-only window resizing is never suppressed.
     const mac = startProbe('mac', noopProxy(), {
         canvas: {width: 800, height: 1200},
         window: {pixelRatio: 2, screenWidth: 1440, screenHeight: 900, windowWidth: 400, windowHeight: 600},
-        globals: {Date: FakeDate},
+        globals: clock.globals,
     });
     mac.runFrames();
     mac.command('setKeyboardActive', 1);
@@ -698,4 +752,116 @@ test('mobile keyboard height-only window resizes are ignored while active and se
     mac.runFrames();
     assert.deepEqual([mac.command('graphicsWidth'), mac.command('graphicsHeight')], [800, 1000]);
     assert.deepEqual(mac.values('resizeHeight'), [1200, 1000]);
+    assert.equal(clock.pendingCount(), 0);
+});
+
+test('deferred mobile keyboard resize reconciles after settle without spurious wakeups, handles hide/show, clock jump, and stale timers', () => {
+    const clock = createFakeClock(20_000);
+    const android = startProbe('android', noopProxy(), {
+        canvas: {width: 1080, height: 2400},
+        window: {pixelRatio: 3, screenWidth: 360, screenHeight: 800, windowWidth: 360, windowHeight: 800},
+        globals: clock.globals,
+    });
+    android.runFrames();
+    android.command('continuous', 0);
+    android.runFrames();
+    assert.equal(android.pendingFrames(), 0);
+
+    // 1. Normal keyboard open -> transient shrink -> close -> restore: reconcile sees unchanged
+    // windowInfo (including safeArea == null) and does NOT wake the dormant loop or resize.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 0}); // pre-open height=0 must not schedule early
+    assert.equal(clock.pendingCount(), 0);
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 781});
+    android.fire('keyboardHeightChange', {height: 260});
+    android.fire('keyboardHeightChange', {height: 0});
+    android.fire('keyboardComplete', {});
+    assert.equal(clock.pendingCount(), 1);
+    clock.advance(650);
+    assert.equal(clock.flushDue(), 1);
+    assert.equal(clock.pendingCount(), 0);
+    assert.equal(android.pendingFrames(), 0, 'no-op reconcile must not wake dormant loop even with safeArea=null');
+    assert.deepEqual(android.values('resizeHeight'), [2400]);
+
+    // 2. Real portrait split-screen while keyboard is open (no further windowResize after close):
+    // deferred resize reconciles automatically once keyboard closes and settles.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 260});
+    Object.assign(android.windowInfo, {windowHeight: 400});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 400});
+    assert.deepEqual(android.values('resizeHeight'), [2400], 'deferred while keyboard open');
+    android.fire('keyboardComplete', {});
+    assert.equal(clock.pendingCount(), 1);
+    // Reopening keyboard before timer fires cancels timer while preserving deferredResizePending.
+    clock.advance(200);
+    android.command('setKeyboardActive', 1);
+    assert.equal(clock.pendingCount(), 0, 'reopening keyboard cancels armed reconcile timer');
+    android.command('setKeyboardActive', 0);
+    assert.equal(clock.pendingCount(), 1, 'closing reopened keyboard re-arms reconcile timer');
+    clock.advance(650);
+    assert.equal(clock.flushDue(), 1);
+    assert.equal(android.pendingFrames(), 1, 'changed reconcile wakes dormant loop');
+    android.runFrames();
+    assert.deepEqual([android.command('graphicsWidth'), android.command('graphicsHeight')], [1080, 1200]);
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1200]);
+
+    // 3. Height-only resize arriving inside the 600ms post-close settle window schedules reconcile directly.
+    android.command('setKeyboardActive', 1);
+    android.command('setKeyboardActive', 0);
+    assert.equal(clock.pendingCount(), 0, 'no timer scheduled when nothing was deferred');
+    clock.advance(200);
+    Object.assign(android.windowInfo, {windowHeight: 800});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 800});
+    assert.equal(clock.pendingCount(), 1, 'ignored settle-window resize arms reconcile immediately');
+    assert.equal(clock.scheduled.at(-1).delay, 450, 'delay targets remaining 400ms settle + 50ms margin');
+    clock.advance(450);
+    assert.equal(clock.flushDue(), 1);
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1200, 2400]);
+
+    // 4. hide() cancels pending timer without losing deferredResizePending; show() reconciles after settle.
+    android.command('setKeyboardActive', 1);
+    android.fire('keyboardHeightChange', {height: 260});
+    Object.assign(android.windowInfo, {windowHeight: 500});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 500});
+    android.fire('hide');
+    assert.equal(clock.pendingCount(), 0, 'hide() must not leave a background reconcile timer armed');
+    clock.advance(700);
+    android.fire('show', {});
+    assert.equal(clock.pendingCount(), 0, 'show() after settle reconciles immediately');
+    assert.equal(android.command('graphicsHeight'), 1500, 'reconciled before resume/frame');
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1200, 2400, 1500]);
+
+    // 5. Backward Date.now() clock jump (>24.85 days) never latches settle window or overflows delayMs.
+    android.command('setKeyboardActive', 1);
+    android.command('setKeyboardActive', 0);
+    clock.setNow(clock.now() - 30 * 24 * 60 * 60 * 1000);
+    Object.assign(android.windowInfo, {windowHeight: 800});
+    android.fire('windowResize', {windowWidth: 360, windowHeight: 800});
+    android.runFrames();
+    assert.deepEqual(android.values('resizeHeight'), [2400, 1200, 2400, 1500, 2400],
+        'backward clock jump must treat settle window as expired instead of suppressing indefinitely');
+    assert.equal(clock.pendingCount(), 0);
+
+    // 6. Stale timer callback (when host clearTimeout races delivery) is rejected by reconcileGeneration.
+    const racingClock = createFakeClock(50_000, {noopClear: true});
+    const racing = startProbe('android', noopProxy(), {
+        canvas: {width: 1080, height: 2400},
+        window: {pixelRatio: 3, screenWidth: 360, screenHeight: 800, windowWidth: 360, windowHeight: 800},
+        globals: racingClock.globals,
+    });
+    racing.runFrames();
+    racing.command('setKeyboardActive', 1);
+    Object.assign(racing.windowInfo, {windowHeight: 400});
+    racing.fire('windowResize', {windowWidth: 360, windowHeight: 400});
+    racing.command('setKeyboardActive', 0); // arms timer #0
+    racing.command('setKeyboardActive', 1); // cancels timer #0 (bumped generation), keyboard open again
+    racingClock.advance(700);
+    assert.equal(racingClock.flushDue(), 1, 'stale timer #0 callback delivers');
+    assert.equal(racing.command('graphicsHeight'), 2400, 'stale timer callback must not reconcile while reopened');
+    racing.command('setKeyboardActive', 0); // arms timer #1
+    racingClock.advance(650);
+    assert.equal(racingClock.flushDue(), 1);
+    assert.equal(racing.command('graphicsHeight'), 1200, 'fresh timer #1 reconciles cleanly');
 });

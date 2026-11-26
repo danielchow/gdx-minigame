@@ -20,6 +20,7 @@ import com.github.xpenatan.gdx.teavm.backends.minigame.gl.WebGLRenderingContextE
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSFunctor;
 import org.teavm.jso.JSObject;
+import org.teavm.jso.browser.TimerHandler;
 import org.teavm.jso.dom.html.HTMLCanvasElement;
 import org.teavm.jso.webgl.WebGLContextAttributes;
 import org.teavm.jso.webgl.WebGLRenderingContext;
@@ -61,6 +62,10 @@ public class MiniGameGraphics implements Graphics {
     // wx.getWindowInfo() is a synchronous native call. Layout code reads density and safe insets
     // per widget, so they are cached here and refreshed on wx.onWindowResize.
     private static final double KEYBOARD_RESIZE_SETTLE_MS = 600.0;
+    private static final int RECONCILE_DELAY_MARGIN_MS = 50;
+    private static final int METRICS_IGNORED = 0;
+    private static final int METRICS_UNCHANGED = 1;
+    private static final int METRICS_CHANGED = 2;
     private final boolean mobilePlatform;
     private double pixelRatio = 1;
     private int safeInsetTop;
@@ -75,6 +80,10 @@ public class MiniGameGraphics implements Graphics {
     private boolean keyboardHeightOpen;
     private boolean keyboardListenersRegistered;
     private double lastKeyboardEventMs = Double.NEGATIVE_INFINITY;
+    private boolean deferredResizePending;
+    private boolean appHidden;
+    private JSObject reconcileTimer;
+    private int reconcileGeneration;
 
     public MiniGameGraphics(MiniGameApplicationConfiguration config) {
         this.config = config;
@@ -87,7 +96,7 @@ public class MiniGameGraphics implements Graphics {
         // that WeChat stretched over the final window.
         applyWindowMetrics(null);
         WX.onWindowResize((LifecycleCallback) resize -> {
-            if (applyWindowMetrics(resize)) {
+            if (applyWindowMetrics(resize) != METRICS_IGNORED) {
                 requestRendering();
             }
         });
@@ -272,26 +281,94 @@ public class MiniGameGraphics implements Graphics {
                     keyboardHeightOpen = height > 0;
                     if (wasOpen && !keyboardHeightOpen) keyboardActive = false;
                     lastKeyboardEventMs = nowMs();
+                    if (keyboardHeightOpen) {
+                        cancelReconcileTimer();
+                    } else if (deferredResizePending && !appHidden && !keyboardActive) {
+                        scheduleReconcile();
+                    }
                 },
                 () -> {
                     keyboardHeightOpen = false;
                     keyboardActive = false;
                     lastKeyboardEventMs = nowMs();
+                    if (deferredResizePending && !appHidden) {
+                        scheduleReconcile();
+                    }
                 }
             );
         }
-        if (active || keyboardActive || keyboardHeightOpen) {
+        boolean hadKeyboard = keyboardActive || keyboardHeightOpen;
+        if (active || hadKeyboard) {
             lastKeyboardEventMs = nowMs();
         }
         keyboardActive = active;
-        if (!active) {
+        if (active) {
+            cancelReconcileTimer();
+        } else {
             keyboardHeightOpen = false;
+            if (deferredResizePending && !appHidden && (hadKeyboard || reconcileTimer == null)) {
+                scheduleReconcile();
+            }
+        }
+    }
+
+    void onAppHide() {
+        appHidden = true;
+        setKeyboardActive(false);
+        cancelReconcileTimer();
+    }
+
+    void onAppShow() {
+        appHidden = false;
+        if (deferredResizePending && !keyboardActive && !keyboardHeightOpen) {
+            if (!isKeyboardResizeWindow()) {
+                reconcileDeferredResize();
+            } else if (reconcileTimer == null) {
+                scheduleReconcile();
+            }
         }
     }
 
     private boolean isKeyboardResizeWindow() {
-        return keyboardActive || keyboardHeightOpen
-            || (nowMs() - lastKeyboardEventMs) < KEYBOARD_RESIZE_SETTLE_MS;
+        if (keyboardActive || keyboardHeightOpen) return true;
+        double elapsed = nowMs() - lastKeyboardEventMs;
+        return elapsed >= 0.0 && elapsed < KEYBOARD_RESIZE_SETTLE_MS;
+    }
+
+    private void cancelReconcileTimer() {
+        reconcileGeneration++;
+        JSObject handle = reconcileTimer;
+        reconcileTimer = null;
+        if (handle != null) {
+            clearTimeoutHandle(handle);
+        }
+    }
+
+    private void scheduleReconcile() {
+        cancelReconcileTimer();
+        double elapsed = nowMs() - lastKeyboardEventMs;
+        double remaining = (elapsed >= 0.0 && elapsed < KEYBOARD_RESIZE_SETTLE_MS)
+            ? (KEYBOARD_RESIZE_SETTLE_MS - elapsed) : 0.0;
+        int delayMs = (remaining > 0.0 ? (int) Math.ceil(remaining) : 0) + RECONCILE_DELAY_MARGIN_MS;
+        final int generation = reconcileGeneration;
+        reconcileTimer = scheduleTimeout(() -> {
+            if (generation != reconcileGeneration) return;
+            reconcileTimer = null;
+            reconcileDeferredResize();
+        }, delayMs);
+    }
+
+    private void reconcileDeferredResize() {
+        if (!deferredResizePending || appHidden) return;
+        if (keyboardActive || keyboardHeightOpen) return;
+        if (isKeyboardResizeWindow()) {
+            scheduleReconcile();
+            return;
+        }
+        deferredResizePending = false;
+        if (applyWindowMetrics(null) == METRICS_CHANGED) {
+            requestRendering();
+        }
     }
 
     private boolean shouldIgnoreMobileKeyboardResize(
@@ -315,6 +392,21 @@ public class MiniGameGraphics implements Graphics {
 
     @JSBody(script = "return Date.now();")
     private static native double nowMs();
+
+    @JSBody(
+        params = {"timerCallback", "delayMillis"},
+        script = "if (typeof setTimeout !== 'function') return null;"
+            + " var timerHandle = setTimeout(timerCallback, delayMillis);"
+            + " return timerHandle === undefined ? null : timerHandle;"
+    )
+    private static native JSObject scheduleTimeout(TimerHandler timerCallback, int delayMillis);
+
+    @JSBody(
+        params = "timerHandle",
+        script = "if (timerHandle !== null && timerHandle !== undefined && typeof clearTimeout === 'function') {"
+            + " clearTimeout(timerHandle); }"
+    )
+    private static native void clearTimeoutHandle(JSObject timerHandle);
 
     @JSBody(
         params = {"onHeight", "onComplete"},
@@ -349,7 +441,7 @@ public class MiniGameGraphics implements Graphics {
         applyWindowMetrics(resize);
     }
 
-    private boolean applyWindowMetrics(JSObject resize) {
+    private int applyWindowMetrics(JSObject resize) {
         WXWindowInfo info = WX.getWindowInfo();
         double nextPixelRatio = info.getPixelRatio();
         // The event's size is the new one; desktop WeChat's getWindowInfo() can still lag behind it.
@@ -359,27 +451,52 @@ public class MiniGameGraphics implements Graphics {
         double nextWindowHeight = eventHeight > 0 ? eventHeight : info.getWindowHeight();
         double nextScreenHeight = info.getScreenHeight();
         if (resize != null && shouldIgnoreMobileKeyboardResize(nextWindowWidth, nextPixelRatio, nextScreenHeight)) {
-            return false;
+            deferredResizePending = true;
+            if (!appHidden && !keyboardActive && !keyboardHeightOpen && reconcileTimer == null) {
+                scheduleReconcile();
+            }
+            return METRICS_IGNORED;
         }
+        deferredResizePending = false;
+        cancelReconcileTimer();
+        int width = (int) (nextWindowWidth * nextPixelRatio);
+        int height = (int) (nextWindowHeight * nextPixelRatio);
+        int prevCanvasWidth = canvas.getWidth();
+        int prevCanvasHeight = canvas.getHeight();
+        // Assigning a size clears the drawing buffer even when it is unchanged.
+        if (prevCanvasWidth != width) canvas.setWidth(width);
+        if (prevCanvasHeight != height) canvas.setHeight(height);
+        WXWindowInfo.SafeArea safeArea = info.getSafeArea();
+        int nextSafeInsetTop;
+        int nextSafeInsetLeft;
+        int nextSafeInsetBottom;
+        int nextSafeInsetRight;
+        if (safeArea == null) {
+            nextSafeInsetTop = nextSafeInsetLeft = nextSafeInsetBottom = nextSafeInsetRight = 0;
+        } else {
+            nextSafeInsetTop = (int) (safeArea.getTop() * nextPixelRatio);
+            nextSafeInsetLeft = (int) (safeArea.getLeft() * nextPixelRatio);
+            nextSafeInsetBottom = (int) ((nextScreenHeight - safeArea.getBottom()) * nextPixelRatio);
+            nextSafeInsetRight = (int) ((info.getScreenWidth() - safeArea.getRight()) * nextPixelRatio);
+        }
+        boolean changed = prevCanvasWidth != width
+            || prevCanvasHeight != height
+            || pixelRatio != nextPixelRatio
+            || windowWidth != nextWindowWidth
+            || windowHeight != nextWindowHeight
+            || safeInsetTop != nextSafeInsetTop
+            || safeInsetLeft != nextSafeInsetLeft
+            || safeInsetBottom != nextSafeInsetBottom
+            || safeInsetRight != nextSafeInsetRight;
         pixelRatio = nextPixelRatio;
         windowWidth = nextWindowWidth;
         windowHeight = nextWindowHeight;
         screenHeight = nextScreenHeight;
-        int width = (int) (windowWidth * pixelRatio);
-        int height = (int) (windowHeight * pixelRatio);
-        // Assigning a size clears the drawing buffer even when it is unchanged.
-        if (canvas.getWidth() != width) canvas.setWidth(width);
-        if (canvas.getHeight() != height) canvas.setHeight(height);
-        WXWindowInfo.SafeArea safeArea = info.getSafeArea();
-        if (safeArea == null) {
-            safeInsetTop = safeInsetLeft = safeInsetBottom = safeInsetRight = 0;
-            return true;
-        }
-        safeInsetTop = (int) (safeArea.getTop() * pixelRatio);
-        safeInsetLeft = (int) (safeArea.getLeft() * pixelRatio);
-        safeInsetBottom = (int) ((info.getScreenHeight() - safeArea.getBottom()) * pixelRatio);
-        safeInsetRight = (int) ((info.getScreenWidth() - safeArea.getRight()) * pixelRatio);
-        return true;
+        safeInsetTop = nextSafeInsetTop;
+        safeInsetLeft = nextSafeInsetLeft;
+        safeInsetBottom = nextSafeInsetBottom;
+        safeInsetRight = nextSafeInsetRight;
+        return changed ? METRICS_CHANGED : METRICS_UNCHANGED;
     }
 
     // === Display (WeChat is always fullscreen) ===

@@ -239,6 +239,7 @@ public class MiniGameApplication implements Application {
     private void hide() {
         if (hidden) return;
         hidden = true;
+        if (graphics != null) graphics.onAppHide();
         ++frameGeneration;
         if (pendingFrame != -1) WX.cancelAnimationFrame(pendingFrame);
         pendingFrame = -1;
@@ -252,7 +253,6 @@ public class MiniGameApplication implements Application {
         }
         // After the listeners, so music the game pauses itself is not resumed on show
         audio.onHide();
-        if (graphics != null) graphics.setKeyboardActive(false);
     }
 
     private void show() {
@@ -264,6 +264,7 @@ public class MiniGameApplication implements Application {
             return;
         }
         hidden = false;
+        if (graphics != null) graphics.onAppShow();
         if (initState == AppState.APP_LOOP) {
             synchronized (lifecycleListeners) {
                 for (LifecycleListener listener : lifecycleListeners) {
